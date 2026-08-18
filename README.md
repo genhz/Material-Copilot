@@ -23,7 +23,7 @@ Material-Copilot 是一个专为材料科学（特别是磁性材料、稀土合
 
 
 <p align="center">
-  <img src="doc/frontend.png" width="48%">
+  <img src="doc/frontend.png" width="95%">
 </p>
 
 ## 🛠️ 技术栈 (Tech Stack)
