@@ -1,11 +1,22 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { Sunny, Moon } from '@element-plus/icons-vue'
 import SearchBar from './crystal/SearchBar.vue'
 import CrystalViewer from './crystal/CrystalViewer.vue'
 import MaterialPanel from './data/MaterialPanel.vue'
 import AIAssistant from './chat/AIAssistant.vue'
 import { useMaterialSearch } from '../composables/useMaterialSearch'
 import type { MaterialData } from '../types/material'
+
+interface Props {
+  isDarkMode: boolean
+}
+
+const props = defineProps<Props>()
+
+const emit = defineEmits<{
+  toggleTheme: []
+}>()
 
 const {
   currentMaterial,
@@ -28,6 +39,10 @@ const handleClosePanel = () => {
 const handleMaterialFound = (data: MaterialData) => {
   setMaterial(data)
 }
+
+const handleThemeToggle = () => {
+  emit('toggleTheme')
+}
 </script>
 
 <template>
@@ -36,6 +51,7 @@ const handleMaterialFound = (data: MaterialData) => {
     <CrystalViewer
       :cif-data="currentMaterial?.cif ?? null"
       :is-loading="isLoading"
+      :is-dark-mode="isDarkMode"
     />
 
     <!-- Floating Search Bar - Top Center -->
@@ -44,6 +60,16 @@ const handleMaterialFound = (data: MaterialData) => {
         <span class="search-logo">🔬</span>
         <SearchBar @search="handleSearch" />
       </div>
+    </div>
+
+    <!-- Theme Toggle - Top Right -->
+    <div class="theme-toggle">
+      <el-switch
+        :model-value="isDarkMode"
+        :active-action-icon="Moon"
+        :inactive-action-icon="Sunny"
+        @update:model-value="handleThemeToggle"
+      />
     </div>
 
     <!-- Error Alert -->
@@ -139,6 +165,11 @@ const handleMaterialFound = (data: MaterialData) => {
       </div>
     </Transition>
 
+    <!-- Bottom Hint - Centered -->
+    <div class="bottom-hint">
+      🖱️ 拖拽旋转 · 滚轮缩放 · 右键平移
+    </div>
+
     <!-- AI Assistant (Top Layer) -->
     <AIAssistant @material-found="handleMaterialFound" />
   </div>
@@ -184,6 +215,19 @@ export default { components: { TrendCharts } }
 
 .search-logo {
   font-size: 24px;
+}
+
+/* Theme Toggle */
+.theme-toggle {
+  position: fixed;
+  top: 24px;
+  right: 24px;
+  z-index: 50;
+}
+
+.theme-toggle :deep(.el-switch) {
+  --el-switch-on-color: #6366f1;
+  --el-switch-off-color: #fbbf24;
 }
 
 /* Error Overlay */
@@ -355,6 +399,23 @@ export default { components: { TrendCharts } }
   color: #e2e8f0;
   font-size: 14px;
   font-weight: 600;
+}
+
+/* Bottom Hint - Centered */
+.bottom-hint {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  color: rgba(148, 163, 184, 0.7);
+  font-size: 13px;
+  pointer-events: none;
+  user-select: none;
+  backdrop-filter: blur(4px);
+  padding: 6px 16px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.3);
 }
 
 /* Transitions */

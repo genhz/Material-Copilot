@@ -1,18 +1,23 @@
 <script setup lang="ts">
-import { ref, onMounted, watch, onBeforeUnmount, nextTick } from 'vue'
+import { ref, onMounted, watch, onBeforeUnmount, nextTick, computed } from 'vue'
 
 interface Props {
   cifData: string | null
   isLoading?: boolean
+  isDarkMode?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   cifData: null,
   isLoading: false,
+  isDarkMode: true,
 })
 
 const containerRef = ref<HTMLElement | null>(null)
 let viewer: any = null
+
+// 背景色
+const bgColorHex = computed(() => props.isDarkMode ? 0x0f172a : 0xf8fafc)
 
 // 元素颜色映射 (Jmol 配色方案)
 const elementColors: Record<string, string> = {
@@ -41,6 +46,9 @@ const elementColors: Record<string, string> = {
   Bi: '#9E4FB5', Po: '#AB5C00', At: '#754F45', Rn: '#428296',
 }
 
+// 标签背景色 (根据主题动态调整)
+const labelBgColor = computed(() => props.isDarkMode ? 'rgba(0, 0, 0, 0.7)' : 'rgba(255, 255, 255, 0.85)')
+
 // 获取元素符号 (从原子标签中提取)
 function getElementSymbol(label: string): string {
   const match = label.match(/^([A-Z][a-z]?)/)
@@ -53,7 +61,7 @@ const initViewer = async () => {
 
   if (typeof ($3Dmol as any) !== 'undefined') {
     viewer = ($3Dmol as any).createViewer(containerRef.value, {
-      backgroundColor: '#0f172a',
+      backgroundColor: bgColorHex.value,
       disableCartoon: true,
       antialias: true,
       orthographic: false,
@@ -63,8 +71,8 @@ const initViewer = async () => {
       viewer.addLabel('等待加载晶体结构...', {
         position: { x: 0, y: 0, z: 0 },
         fontSize: 20,
-        fontColor: '#64748b',
-        backgroundColor: 'rgba(15, 23, 42, 0.8)',
+        fontColor: props.isDarkMode ? '#64748b' : '#94a3b8',
+        backgroundColor: props.isDarkMode ? 'rgba(15, 23, 42, 0.8)' : 'rgba(255, 255, 255, 0.8)',
       })
       viewer.render()
     }
@@ -72,6 +80,14 @@ const initViewer = async () => {
     console.error('$3Dmol not loaded')
   }
 }
+
+// 监听主题变化，同步更新 3Dmol 背景色
+watch(() => props.isDarkMode, (dark) => {
+  if (!viewer) return
+  const color = dark ? 0x0f172a : 0xf8fafc
+  viewer.setBackgroundColor(color)
+  viewer.render()
+})
 
 watch(
   () => props.cifData,
@@ -95,13 +111,13 @@ watch(
         const atoms = model.atoms
         atoms.forEach((atom: any) => {
           const elem = getElementSymbol(atom.elem)
-          const color = elementColors[elem] || '#FFFFFF'
+          const color = elementColors[elem] || (props.isDarkMode ? '#FFFFFF' : '#1e293b')
 
           viewer.addLabel(elem, {
             position: { x: atom.x, y: atom.y, z: atom.z },
             fontSize: 14,
             fontColor: color,
-            backgroundColor: 'rgba(0, 0, 0, 0.7)',
+            backgroundColor: labelBgColor.value,
             borderColor: color,
             borderWidth: 1,
             padding: 3,
@@ -141,7 +157,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="crystal-viewer-container">
+  <div class="crystal-viewer-container" :class="{ 'is-dark': isDarkMode }">
     <div
       v-if="isLoading"
       class="loading-overlay"
@@ -151,10 +167,6 @@ onBeforeUnmount(() => {
     </div>
 
     <div ref="containerRef" class="viewer-container"></div>
-
-    <div class="hint-overlay">
-      <span>🖱️ 拖拽旋转 · 滚轮缩放 · 右键平移</span>
-    </div>
   </div>
 </template>
 
@@ -170,8 +182,12 @@ export default { components: { Loading } }
   left: 0;
   width: 100vw;
   height: 100vh;
-  background: #0f172a;
+  background: #f8fafc;
   overflow: hidden;
+}
+
+.crystal-viewer-container.is-dark {
+  background: #0f172a;
 }
 
 .viewer-container {
@@ -194,17 +210,5 @@ export default { components: { Loading } }
   color: #94a3b8;
   margin-top: 16px;
   font-size: 14px;
-}
-
-.hint-overlay {
-  position: absolute;
-  bottom: 20px;
-  right: 20px;
-  background: rgba(0, 0, 0, 0.6);
-  color: #94a3b8;
-  padding: 8px 16px;
-  border-radius: 8px;
-  font-size: 13px;
-  backdrop-filter: blur(4px);
 }
 </style>
