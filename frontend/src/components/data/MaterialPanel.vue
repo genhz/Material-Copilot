@@ -46,9 +46,12 @@ const densityText = computed(() => {
 
 const spaceGroupText = computed(() => {
   if (!props.material) return 'N/A'
-  return props.material.spacegroup
-    ? `${props.material.spacegroup.symbol} (${props.material.spacegroup.number})`
-    : 'N/A'
+  const sym = props.material.spacegroup_symbol
+  const num = props.material.spacegroup_number
+  if (sym && num != null) {
+    return `${sym} (${num})`
+  }
+  return 'N/A'
 })
 
 const crystalSystemText = computed(() => {
@@ -58,7 +61,7 @@ const crystalSystemText = computed(() => {
 
 const formulaText = computed(() => {
   if (!props.material) return 'N/A'
-  return props.material.formula || 'N/A'
+  return props.material.pretty_formula || props.material.formula || 'N/A'
 })
 
 const formulaUnitText = computed(() => {
@@ -66,6 +69,11 @@ const formulaUnitText = computed(() => {
   return props.material.formula_unit != null
     ? `${props.material.formula_unit}`
     : 'N/A'
+})
+
+const elementsList = computed(() => {
+  if (!props.material) return []
+  return props.material.elements || []
 })
 </script>
 
@@ -97,6 +105,11 @@ const formulaUnitText = computed(() => {
       <div class="section">
         <div class="section-title">化学式</div>
         <div class="formula-display">{{ formulaText }}</div>
+        <div class="formula-id">
+          <el-tag size="small" type="info" effect="plain">
+            {{ material.material_id }}
+          </el-tag>
+        </div>
       </div>
 
       <!-- Basic Properties -->
@@ -142,6 +155,21 @@ const formulaUnitText = computed(() => {
         >
           {{ material.magnetic_ordering }}
         </el-tag>
+      </div>
+
+      <!-- Elements -->
+      <div v-if="elementsList.length > 0" class="section">
+        <div class="section-title">组成元素</div>
+        <div class="elements-list">
+          <el-tag
+            v-for="elem in elementsList"
+            :key="elem"
+            size="small"
+            class="element-tag"
+          >
+            {{ elem }}
+          </el-tag>
+        </div>
       </div>
     </div>
 
@@ -257,8 +285,7 @@ export default { components: { Close, Loading } }
 .formula-display {
   font-size: 28px;
   font-weight: 700;
-  color: #e2e8f0;
-  padding: 16px 0;
+  padding: 16px 0 8px;
   text-align: center;
   background: linear-gradient(135deg, #818cf8, #c084fc);
   -webkit-background-clip: text;
@@ -266,11 +293,28 @@ export default { components: { Close, Loading } }
   background-clip: text;
 }
 
+.formula-id {
+  text-align: center;
+  margin-bottom: 8px;
+}
+
 .descriptions {
   --el-descriptions-item-label-background: rgba(99, 102, 241, 0.1);
   --el-descriptions-item-bordered-label-background: rgba(99, 102, 241, 0.1);
   --el-descriptions-border-color: rgba(99, 102, 241, 0.15);
   --el-descriptions-text-color: #cbd5e1;
+}
+
+.elements-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.element-tag {
+  background: rgba(99, 102, 241, 0.15);
+  border-color: rgba(99, 102, 241, 0.25);
+  color: #a5b4fc;
 }
 
 .panel-empty {

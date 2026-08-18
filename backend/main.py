@@ -12,9 +12,9 @@ import os
 import json
 import logging
 import uuid
-from typing import Optional
+from typing import Optional, List
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from openai import AsyncOpenAI
@@ -129,6 +129,15 @@ class MaterialData(BaseModel):
     is_magnetic: Optional[bool] = None
     formation_energy: Optional[float] = None
     cif: str
+    # Extended properties
+    density: Optional[float] = None
+    spacegroup_symbol: Optional[str] = None
+    spacegroup_number: Optional[int] = None
+    crystal_system: Optional[str] = None
+    formula_unit: Optional[int] = None
+    magnetic_ordering: Optional[str] = None
+    elements: Optional[List[str]] = None
+    pretty_formula: Optional[str] = None
 
 
 class ChatResponse(BaseModel):
@@ -192,6 +201,10 @@ def search_material_from_mp(formula: str) -> MaterialData:
                 "band_gap",
                 "is_magnetic",
                 "formation_energy_per_atom",
+                "density",
+                "symmetry",  # Contains spacegroup info
+                "elements",
+                "formula_pretty",
             ],
         )
 
@@ -205,14 +218,45 @@ def search_material_from_mp(formula: str) -> MaterialData:
 
     cif_str = best_doc.structure.to(fmt="cif")
 
-    return MaterialData(
+    # 安全获取 symmetry (spacegroup) 信息
+    spacegroup_symbol = None
+    spacegroup_number = None
+    crystal_system = None
+    if hasattr(best_doc, 'symmetry') and best_doc.symmetry:
+        spacegroup_symbol = getattr(best_doc.symmetry, 'symbol', None)
+        spacegroup_number = getattr(best_doc.symmetry, 'number', None)
+        crystal_system = getattr(best_doc.symmetry, 'crystal_system', None)
+
+    # 构建磁性有序标签
+    magnetic_ordering = None
+    if best_doc.is_magnetic:
+        ordering = getattr(best_doc, 'ordering', None)
+        magnetic_ordering = ordering or "FM"
+
+    # 转换 elements 为字符串列表
+    elements_raw = getattr(best_doc, 'elements', None)
+    elements_list = [str(elem) for elem in elements_raw] if elements_raw else None
+
+    material_data = MaterialData(
         formula=formula,
-        material_id=best_doc.material_id or "unknown",
-        band_gap=best_doc.band_gap,
-        is_magnetic=best_doc.is_magnetic,
-        formation_energy=best_doc.formation_energy_per_atom,
+        material_id=getattr(best_doc, 'material_id', 'unknown') or 'unknown',
+        band_gap=getattr(best_doc, 'band_gap', None),
+        is_magnetic=getattr(best_doc, 'is_magnetic', None),
+        formation_energy=getattr(best_doc, 'formation_energy_per_atom', None),
         cif=cif_str,
+        density=getattr(best_doc, 'density', None),
+        spacegroup_symbol=spacegroup_symbol,
+        spacegroup_number=spacegroup_number,
+        crystal_system=crystal_system,
+        formula_unit=getattr(best_doc, 'nsites', None),
+        magnetic_ordering=magnetic_ordering,
+        elements=elements_list,
+        pretty_formula=getattr(best_doc, 'formula_pretty', None),
     )
+
+    # 调试输出：确认后端发出的数据
+    print(f"[DEBUG] Material data returned: {material_data.model_dump()}")
+    return material_data
 
 
 # ── 路由 ──────────────────────────────────────────────────────
@@ -274,7 +318,7 @@ async def chat(request: ChatRequest):
                 args = json.loads(tool_call.function.arguments)
                 formula = args.get("formula", "")
 
-                logger.info(f"Function Calling 触发: search_material(formula='{formula}')")
+                logger.info(f"Function Calling 触发：search_material(formula='{formula}')")
 
                 material_data = search_material_from_mp(formula)
 
@@ -317,7 +361,7 @@ async def chat(request: ChatRequest):
                 question = args.get("question", request.message)
                 context = args.get("context", "")
 
-                logger.info(f"Function Calling 触发: answer_general(question='{question[:50]}...')")
+                logger.info(f"Function Calling 触发：answer_general(question='{question[:50]}...')")
 
                 # 将问题喂回，让模型直接回答
                 messages.append(
@@ -367,7 +411,7 @@ async def chat(request: ChatRequest):
             )
 
     except ValueError as ve:
-        logger.warning(f"查询异常: {ve}")
+        logger.warning(f"查询异常：{ve}")
         error_reply = f"查询失败：{ve}"
         add_to_history(session_id, "assistant", error_reply)
         return ChatResponse(
@@ -376,7 +420,7 @@ async def chat(request: ChatRequest):
             session_id=session_id,
         )
     except RuntimeError as re:
-        logger.error(f"配置异常: {re}")
+        logger.error(f"配置异常：{re}")
         error_reply = f"服务器配置错误：{re}"
         add_to_history(session_id, "assistant", error_reply)
         return ChatResponse(
@@ -385,7 +429,7 @@ async def chat(request: ChatRequest):
             session_id=session_id,
         )
     except Exception as e:
-        logger.exception(f"未知错误: {e}")
+        logger.exception(f"未知错误：{e}")
         error_reply = f"发生未知错误：{e}"
         add_to_history(session_id, "assistant", error_reply)
         return ChatResponse(
@@ -411,10 +455,8 @@ async def direct_material_search(formula: str):
         material_data = search_material_from_mp(formula)
         return material_data
     except ValueError as ve:
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail=str(ve))
     except RuntimeError as re:
-        from fastapi import HTTPException
         raise HTTPException(status_code=500, detail=str(re))
 
 

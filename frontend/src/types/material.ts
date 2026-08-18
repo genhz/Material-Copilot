@@ -14,14 +14,15 @@ export interface MaterialData {
   is_magnetic: boolean | null
   formation_energy: number | null
   cif: string
-  // Extended properties (may be present in API response)
+  // Extended properties from backend
   density?: number | null
-  spacegroup?: SpaceGroupInfo | null
+  spacegroup_symbol?: string | null
+  spacegroup_number?: number | null
   crystal_system?: string | null
   formula_unit?: number | null
   magnetic_ordering?: string | null
-  elements?: string[]
-  pretty_formula?: string
+  elements?: string[] | null
+  pretty_formula?: string | null
 }
 
 export interface ChatMessage {
