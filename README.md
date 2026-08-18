@@ -21,11 +21,9 @@ Material-Copilot 是一个专为材料科学（特别是磁性材料、稀土合
 
 ## 📸 界面预览 (Screenshots)
 
-*(提示：请在此处替换为你的实际项目截图，建议放置一张深色模式、一张浅色模式的截图)*
 
 <p align="center">
-  <img src="https://via.placeholder.com/800x400.png?text=Dark+Mode+Screenshot+Here" width="48%">
-  <img src="https://via.placeholder.com/800x400.png?text=Light+Mode+Screenshot+Here" width="48%">
+  <img src="doc/frontend.png" width="48%">
 </p>
 
 ## 🛠️ 技术栈 (Tech Stack)
