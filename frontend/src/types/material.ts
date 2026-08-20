@@ -39,6 +39,7 @@ export interface ChatRequest {
 
 export interface ChatResponse {
   reply: string
+  action: 'chat' | 'render'  // 新增：区分纯聊天和 3D 渲染
   material_data?: MaterialData | null
   session_id?: string | null
 }

@@ -36,8 +36,15 @@ const handleClosePanel = () => {
   setMaterial(undefined as any)
 }
 
-const handleMaterialFound = (data: MaterialData) => {
-  setMaterial(data)
+const handleMaterialFound = (data: MaterialData, action: 'chat' | 'render') => {
+  console.log('[MainView] materialFound:', { action, formula: data.formula })
+
+  // 只有当 action 为 'render' 时才显示 3D 晶体和侧边栏
+  // 如果是 'chat'，只更新对话，不打开侧边栏
+  if (action === 'render') {
+    setMaterial(data)
+  }
+  // 如果 action 是 'chat'，不更新 currentMaterial，侧边栏保持关闭
 }
 
 const handleThemeToggle = () => {

@@ -5,7 +5,7 @@ import { useAIChat } from '../../composables/useAIChat'
 import type { MaterialData } from '../../types/material'
 
 const emit = defineEmits<{
-  materialFound: [data: MaterialData]
+  materialFound: [data: MaterialData, action: 'chat' | 'render']
 }>()
 
 const { messages, isChatting, sendMessage, clearChat } = useAIChat()
@@ -18,9 +18,9 @@ const handleSend = async () => {
   if (!text || isChatting.value) return
   inputMessage.value = ''
 
-  const materialData = await sendMessage(text)
-  if (materialData) {
-    emit('materialFound', materialData)
+  const result = await sendMessage(text)
+  if (result.materialData) {
+    emit('materialFound', result.materialData, result.action)
   }
 }
 

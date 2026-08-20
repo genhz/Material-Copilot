@@ -15,10 +15,14 @@ let messageIdCounter = 0
 export function useAIChat() {
   /**
    * 发送消息
+   * 返回：{ materialData, action } — 前端根据 action 决定 UI 行为
    */
-  async function sendMessage(text: string): Promise<MaterialData | null> {
+  async function sendMessage(text: string): Promise<{
+    materialData: MaterialData | null
+    action: 'chat' | 'render'
+  }> {
     const trimmed = text.trim()
-    if (!trimmed || isChatting.value) return null
+    if (!trimmed || isChatting.value) return { materialData: null, action: 'chat' }
 
     // 添加用户消息
     messages.value.push({
@@ -42,6 +46,9 @@ export function useAIChat() {
       }
 
       const materialData = response.material_data || null
+      const action = response.action || 'chat'
+
+      console.log('[useAIChat] 收到响应:', { action, formula: materialData?.formula })
 
       // 添加助手回复
       messages.value.push({
@@ -51,14 +58,14 @@ export function useAIChat() {
         materialData,
       })
 
-      return materialData
+      return { materialData, action }
     } catch (error: any) {
       messages.value.push({
         id: messageIdCounter++,
         role: 'assistant',
         content: `请求失败：${error.message || '未知错误'}`,
       })
-      return null
+      return { materialData: null, action: 'chat' }
     } finally {
       isChatting.value = false
     }
