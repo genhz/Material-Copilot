@@ -1,9 +1,11 @@
 """
-材料结构敏捷检索与可视化沙盘 — 后端服务
-FastAPI + Router-Workflow-Skills 架构
+材料结构敏捷检索与可视化沙盘 - 后端服务
+基于 LangChain Agent 架构
 
 架构：
-  Router (意图分类) → Workflow (工作流调度) → Skills (技能执行)
+  LangChain Agent (自动意图识别 + 工具调用)
+    ├─ MaterialSearchTool (查询晶体结构)
+    └─ ChatTool (材料科学问答)
 """
 
 import os
@@ -17,8 +19,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
-from skills.material_search import search_material
-from workflow import execute_workflow
+from agent import execute_agent, AgentResult
+from skills.material_search import MaterialSearchResult
 
 load_dotenv()
 
@@ -26,7 +28,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ── FastAPI 应用 ──────────────────────────────────────────────
-app = FastAPI(title="材料结构检索沙盘", version="0.3.0")
+app = FastAPI(title="材料结构检索沙盘 (LangChain Agent 版)", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -100,11 +102,11 @@ def add_to_history(session_id: str, role: str, content: str):
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     """
-    主聊天接口 — Router → Workflow → Skills 架构
+    主聊天接口 — LangChain Agent 架构
 
     流程：
-    1. Router 对用户消息进行意图分类（CHAT / RENDER_3D）
-    2. Workflow 根据意图执行对应分支
+    1. LangChain Agent 自动判断用户意图
+    2. Agent 决定调用哪个工具（chat 或 material_search）
     3. 返回包含 action 字段的响应，前端据此决定 UI 行为
     """
     session_id = get_or_create_session(request.session_id)
@@ -116,8 +118,8 @@ async def chat(request: ChatRequest):
         # 添加当前用户消息到历史
         add_to_history(session_id, "user", request.message)
 
-        # ── 执行工作流 ──
-        result = await execute_workflow(
+        # ── 执行 LangChain Agent ──
+        result = await execute_agent(
             message=request.message,
             history=history,
         )
@@ -174,26 +176,16 @@ async def health():
 @app.get("/api/material/search", response_model=MaterialData)
 async def direct_material_search(formula: str):
     """
-    直接通过 Materials Project API 查询材料数据（不走工作流）。
+    直接通过 Materials Project API 查询材料数据（不走 Agent）。
+    用于前端直接调用搜索功能。
     """
+    from skills.material_search import MaterialSearchTool
+
+    tool = MaterialSearchTool()
     try:
-        result = search_material(formula)
-        return MaterialData(
-            formula=result.formula,
-            material_id=result.material_id,
-            band_gap=result.band_gap,
-            is_magnetic=result.is_magnetic,
-            formation_energy=result.formation_energy,
-            cif=result.cif,
-            density=result.density,
-            spacegroup_symbol=result.spacegroup_symbol,
-            spacegroup_number=result.spacegroup_number,
-            crystal_system=result.crystal_system,
-            formula_unit=result.formula_unit,
-            magnetic_ordering=result.magnetic_ordering,
-            elements=result.elements,
-            pretty_formula=result.pretty_formula,
-        )
+        result_json = tool._run(formula)
+        result_dict = json.loads(result_json)
+        return MaterialData(**result_dict)
     except ValueError as ve:
         raise HTTPException(status_code=404, detail=str(ve))
     except RuntimeError as re:

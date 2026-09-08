@@ -1,7 +1,7 @@
 """
-技能模块 — 每个技能封装一个独立的能力
+Skills package - LangChain Tools for Material Sandbox
 """
-from skills.material_search import search_material as material_search
-from skills.chat import chat as chat_skill
+from skills.material_search import MaterialSearchTool
+from skills.chat import ChatTool
 
-__all__ = ["material_search", "chat_skill"]
+__all__ = ["MaterialSearchTool", "ChatTool"]
