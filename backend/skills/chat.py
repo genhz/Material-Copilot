@@ -47,20 +47,23 @@ class ChatTool(BaseTool):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self._client = self._create_client()
+        self._client: Optional[ChatOpenAI] = None
 
-    def _create_client(self) -> ChatOpenAI:
-        """创建 LangChain ChatOpenAI 客户端"""
-        api_key = os.getenv("DEEPSEEK_API_KEY", "")
-        base_url = "https://api.deepseek.com"
+    @property
+    def client(self) -> ChatOpenAI:
+        """懒加载 ChatOpenAI 客户端"""
+        if self._client is None:
+            api_key = os.getenv("DEEPSEEK_API_KEY", "")
+            base_url = "https://api.deepseek.com"
 
-        return ChatOpenAI(
-            model="deepseek-chat",
-            api_key=api_key,
-            base_url=base_url,
-            temperature=0.7,
-            max_tokens=1000,
-        )
+            self._client = ChatOpenAI(
+                model="deepseek-chat",
+                api_key=api_key,
+                base_url=base_url,
+                temperature=0.7,
+                max_tokens=1000,
+            )
+        return self._client
 
     def _run(
         self,
@@ -119,7 +122,7 @@ class ChatTool(BaseTool):
         messages.append(HumanMessage(content=message))
 
         try:
-            response = self._client.invoke(messages)
+            response = self.client.invoke(messages)
             reply = response.content or "抱歉，我没有理解你的问题。"
             print(f"[ChatTool] 回复生成成功 (长度：{len(reply)})")
             return reply

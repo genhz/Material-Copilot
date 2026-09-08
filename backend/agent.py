@@ -16,6 +16,7 @@ from langgraph.prebuilt import create_react_agent
 
 from skills.material_search import MaterialSearchTool, MaterialSearchResult
 from skills.chat import ChatTool
+from skills.element_substitution import ElementSubstitutionTool
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,11 @@ AGENT_SYSTEM_PROMPT = """你是一个材料科学助手，拥有以下工具：
 2. **chat**: 与材料科学专家进行对话。用于回答概念性问题、材料推荐、趋势分析等不需要查询具体数据的讨论。
    - 例如："什么是带隙？"、"哪些材料适合做永磁体？"、"钕铁硼能用镧系元素替代吗？"
 
-请根据用户的问题自动选择合适的工具。如果用户的问题涉及具体材料的结构数据，使用 material_search；如果是概念性讨论或材料推荐，使用 chat。
+3. **element_substitution**: 替换晶体结构中的元素。当用户要求进行元素替代、掺杂、或修改化学式时使用。
+   - 例如："把 Fe 替换成 Co"、"用 La 替代 Nd"、"将 Nd2Fe14B 中的 Fe 全部替换为 Co"
+   - 需要提供当前材料的 CIF 文件和替换规则，返回替换后的新结构和化学式
+
+请根据用户的问题自动选择合适的工具。如果用户的问题涉及具体材料的结构数据，使用 material_search；如果是概念性讨论或材料推荐，使用 chat；如果需要修改元素组成，使用 element_substitution。
 
 始终使用中文回复用户。"""
 
@@ -63,6 +68,7 @@ class MaterialAgent:
             self._tools = [
                 MaterialSearchTool(),
                 ChatTool(),
+                ElementSubstitutionTool(),
             ]
         return self._tools
 
@@ -137,6 +143,15 @@ class MaterialAgent:
                             material_data = MaterialSearchResult(**output_data)
                         except Exception as e:
                             logger.warning(f"解析材料数据失败：{e}")
+
+                    elif name == "element_substitution":
+                        action = "render"
+                        try:
+                            import json
+                            output_data = json.loads(content)
+                            material_data = MaterialSearchResult(**output_data)
+                        except Exception as e:
+                            logger.warning(f"解析元素替换结果失败：{e}")
 
                 elif msg_type == "ai":
                     # AI 回复
