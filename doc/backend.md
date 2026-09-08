@@ -24,6 +24,7 @@
 backend/
 ├── main.py              # FastAPI 入口
 ├── agent.py             # LangChain Agent 封装
+├── config.py            # LLM 配置管理
 ├── skills/
 │   ├── __init__.py
 │   ├── chat.py          # ChatTool - 对话工具
@@ -43,24 +44,68 @@ cd backend
 uv sync
 ```
 
-### 2. 配置环境变量
+### 2. 配置 LLM
 
-```
-DEEPSEEK_API_KEY=your_deepseek_api_key
-MP_API_KEY=your_materials_project_api_key
+编辑 `.env` 文件，修改以下三个值来切换 LLM 提供商：
+
+```bash
+# DeepSeek
+LLM_API_KEY=sk-xxxxxxxx
+LLM_BASE_URL=https://api.deepseek.com
+LLM_MODEL=deepseek-chat
+
+# OpenAI
+LLM_API_KEY=sk-xxxxxxxx
+LLM_BASE_URL=https://api.openai.com/v1
+LLM_MODEL=gpt-4o
+
+# SiliconFlow
+LLM_API_KEY=xxxxxxxx
+LLM_BASE_URL=https://api.siliconflow.cn/v1
+LLM_MODEL=deepseek-ai/DeepSeek-V3
 ```
 
-### 3. 启动服务
+### 3. 配置 Materials Project
+
+```bash
+MP_API_KEY=xxxxxxxx
+```
+
+### 4. 启动服务
 
 ```bash
 uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### 4. 测试 Agent
+### 5. 测试 Agent
 
 ```bash
 uv run python test_agent.py
 ```
+
+## LLM 配置管理
+
+### config.py
+
+使用统一的环境变量名，直接修改 `.env` 中的值来切换提供商：
+
+```python
+from config import get_llm_config
+
+config = get_llm_config()
+print(f"Model: {config.model}")      # e.g. "deepseek-chat"
+print(f"Base URL: {config.base_url}") # e.g. "https://api.deepseek.com"
+print(f"API Key: {config.api_key}")   # e.g. "sk-..."
+```
+
+### 环境变量
+
+| 变量名 | 说明 |
+|--------|------|
+| `LLM_API_KEY` | LLM API 密钥 |
+| `LLM_BASE_URL` | LLM API 基础 URL |
+| `LLM_MODEL` | 模型名称 |
+| `MP_API_KEY` | Materials Project API 密钥 |
 
 ## LangChain 核心概念
 
@@ -113,9 +158,9 @@ A: 原架构需要手动编写意图分类逻辑，而 LangChain Agent 可以自
 
 A: 对于只有几个工具的小项目，确实有些过度设计。但作为学习 Agent 的项目，LangChain 提供了标准的抽象和最佳实践。
 
-### Q: 测试报错 "Insufficient Balance"
+### Q: 如何切换 LLM 提供商？
 
-A: 这是 DeepSeek API 余额不足，需要充值或更换 API Key。代码逻辑是正确的。
+A: 直接修改 `.env` 文件中的 `LLM_API_KEY`、`LLM_BASE_URL` 和 `LLM_MODEL` 三个值即可。
 
 ## 相关文档
 

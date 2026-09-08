@@ -33,16 +33,37 @@ Material-Copilot 是一个专为材料科学（特别是磁性材料、稀土合
 | Vue 3 + Vite | FastAPI |
 | TailwindCSS | LangChain + LangGraph |
 | Element Plus | mp-api (Materials Project) |
-| 3Dmol.js | DeepSeek LLM |
+| 3Dmol.js | 任意 OpenAI 兼容 LLM |
 
 ## 🚀 快速开始
 
 ### 1. 获取 API 密钥
 
 - **Materials Project API Key:** [注册获取](https://nextgen.materialsproject.org/)
-- **DeepSeek API Key:** [访问开放平台](https://platform.deepseek.com/)
+- **LLM API Key:** 支持 DeepSeek、OpenAI 等任意 OpenAI 兼容接口
 
-### 2. 后端启动
+### 2. 配置 LLM
+
+编辑 `backend/.env`，修改以下三个值来切换 LLM 提供商，例如：
+
+```bash
+# DeepSeek
+LLM_API_KEY=sk-xxxxxxxx
+LLM_BASE_URL=https://api.deepseek.com
+LLM_MODEL=deepseek-chat
+
+# OpenAI
+LLM_API_KEY=sk-xxxxxxxx
+LLM_BASE_URL=https://api.openai.com/v1
+LLM_MODEL=gpt-4o
+
+# SiliconFlow
+LLM_API_KEY=xxxxxxxx
+LLM_BASE_URL=https://api.siliconflow.cn/v1
+LLM_MODEL=deepseek-ai/DeepSeek-V3
+```
+
+### 3. 后端启动
 
 ```bash
 cd backend
@@ -53,7 +74,7 @@ uv sync
 uv run uvicorn main:app --reload
 ```
 
-### 3. 前端启动
+### 4. 前端启动
 
 ```bash
 cd frontend
@@ -143,7 +164,8 @@ material-sandbox/
 
 | 问题 | 解决方案 |
 |------|----------|
-| `Insufficient Balance` | DeepSeek API 余额不足，需充值或更换 Key |
+| `LLM_API_KEY 未配置` | 检查 `.env` 中 `LLM_API_KEY` 是否正确设置 |
+| `Insufficient Balance` | LLM API 余额不足，需充值或更换 Key |
 | `401 Unauthorized` | 检查 `.env` 中 API Key 是否正确 |
 | 3D 画布不显示 | 使用 Chrome/Firefox/Edge 最新版 |
 
@@ -166,5 +188,4 @@ MIT License © 2026 Material-Copilot Project
 ## 🙏 致谢
 
 - [Materials Project](https://materialsproject.org/) - 晶体结构数据
-- [DeepSeek](https://platform.deepseek.com/) - LLM 服务
 - [3Dmol.js](https://3dmol.csb.pitt.edu/) - 3D 渲染引擎

@@ -1,13 +1,13 @@
 """
 聊天工具 - 基于 LangChain Tool 接口封装对话能力
 """
-import os
 from typing import Type, Optional, List, Dict
 from pydantic import BaseModel, Field
 
 from langchain_core.tools import BaseTool
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+from config import get_llm_config
 
 
 class ChatInput(BaseModel):
@@ -53,13 +53,13 @@ class ChatTool(BaseTool):
     def client(self) -> ChatOpenAI:
         """懒加载 ChatOpenAI 客户端"""
         if self._client is None:
-            api_key = os.getenv("DEEPSEEK_API_KEY", "")
-            base_url = "https://api.deepseek.com"
+            # 从配置加载 LLM 设置
+            config = get_llm_config()
 
             self._client = ChatOpenAI(
-                model="deepseek-chat",
-                api_key=api_key,
-                base_url=base_url,
+                model=config.model,
+                api_key=config.api_key,
+                base_url=config.base_url,
                 temperature=0.7,
                 max_tokens=1000,
             )

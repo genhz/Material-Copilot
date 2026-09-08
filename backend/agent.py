@@ -5,8 +5,8 @@ LangChain Agent 工作流 - 使用 ReAct Agent 进行意图识别和工具调用
 - 使用 LangGraph 的 create_react_agent 创建 ReAct Agent
 - Agent 根据用户消息自动决定调用哪个工具（chat 或 material_search）
 - 不再需要显式的 Router 分类，Agent 自行判断意图
+- LLM 配置从环境变量加载，支持多个提供商（DeepSeek、OpenAI 等）
 """
-import os
 import logging
 from typing import Optional, List, Dict
 
@@ -17,6 +17,7 @@ from langgraph.prebuilt import create_react_agent
 from skills.material_search import MaterialSearchTool, MaterialSearchResult
 from skills.chat import ChatTool
 from skills.element_substitution import ElementSubstitutionTool
+from config import get_llm_config
 
 logger = logging.getLogger(__name__)
 
@@ -50,13 +51,13 @@ class MaterialAgent:
     def llm(self) -> ChatOpenAI:
         """懒加载 LLM 客户端"""
         if self._llm is None:
-            api_key = os.getenv("DEEPSEEK_API_KEY", "")
-            base_url = "https://api.deepseek.com"
+            # 从配置加载 LLM 设置
+            config = get_llm_config()
 
             self._llm = ChatOpenAI(
-                model="deepseek-chat",
-                api_key=api_key,
-                base_url=base_url,
+                model=config.model,
+                api_key=config.api_key,
+                base_url=config.base_url,
                 temperature=0.1,  # 低温度确保工具调用一致性
             )
         return self._llm
