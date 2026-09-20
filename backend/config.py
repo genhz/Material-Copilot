@@ -6,6 +6,10 @@ LLM 配置管理 - 从环境变量加载 LLM 配置
 import os
 from dataclasses import dataclass
 from typing import Optional
+from dotenv import load_dotenv
+
+# 加载 .env 文件
+load_dotenv()
 
 
 @dataclass

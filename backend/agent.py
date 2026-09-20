@@ -7,6 +7,7 @@ LangChain Agent 工作流 - 使用 ReAct Agent 进行意图识别和工具调用
 - 不再需要显式的 Router 分类，Agent 自行判断意图
 - LLM 配置从环境变量加载，支持多个提供商（DeepSeek、OpenAI 等）
 """
+import json
 import logging
 from typing import Optional, List, Dict
 
@@ -130,16 +131,14 @@ class MaterialAgent:
             for msg in output_messages:
                 msg_type = getattr(msg, "type", "")
 
-                if msg_type == "tool_message":
+                if msg_type == "tool":
                     # 工具调用结果
-                    tool_call = getattr(msg, "tool_call_id", None)
                     content = getattr(msg, "content", "")
                     name = getattr(msg, "name", "")
 
                     if name == "material_search":
                         action = "render"
                         try:
-                            import json
                             output_data = json.loads(content)
                             material_data = MaterialSearchResult(**output_data)
                         except Exception as e:
@@ -148,7 +147,6 @@ class MaterialAgent:
                     elif name == "element_substitution":
                         action = "render"
                         try:
-                            import json
                             output_data = json.loads(content)
                             material_data = MaterialSearchResult(**output_data)
                         except Exception as e:

@@ -313,7 +313,8 @@ class ElementSubstitutionTool(BaseTool):
                     species = site.species.elements[0]
                     if species.symbol == original_element:
                         # 替换元素（保持占位率不变）
-                        occu = site.species.get_occurrence(site.species.elements[0])
+                        # 使用 site.species 的字典 API
+                        occu = float(site.species[species])
                         site.species = {Element(target_element): occu}
 
                 logger.info(f"[ElementSubstitution] 已替换 {original_element} → {target_element}")
