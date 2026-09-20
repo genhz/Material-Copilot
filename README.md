@@ -16,6 +16,7 @@ Material-Copilot 是一个专为材料科学（特别是磁性材料、稀土合
 - 💬 **对话即检索** — 通过自然语言获取材料数据，无需复杂表单
 - 🤖 **LangChain Agent 驱动** — ReAct Agent 自动判断意图，智能调用工具
 - 🔮 **沉浸式 3D 沙盘** — 全屏 3D 画布实时渲染 CIF 晶体结构
+- 🧪 **MatterGen 候选生成** — 根据目标磁密度异步生成新材料候选
 - 📊 **物性数据卡片** — 展示形成能、带隙、磁性等关键参数
 - 🌓 **深浅色主题** — 适配夜间科研工作
 - 🚀 **前后端解耦** — Vue 3 + FastAPI 轻量架构
@@ -33,7 +34,8 @@ Material-Copilot 是一个专为材料科学（特别是磁性材料、稀土合
 | Vue 3 + Vite | FastAPI |
 | TailwindCSS | LangChain + LangGraph |
 | Element Plus | mp-api (Materials Project) |
-| 3Dmol.js | 任意 OpenAI 兼容 LLM |
+| 3Dmol.js | MatterGen + PyTorch |
+| ECharts | 任意 OpenAI 兼容 LLM |
 
 ## 🚀 快速开始
 
@@ -66,13 +68,22 @@ LLM_MODEL=deepseek-ai/DeepSeek-V3
 ### 3. 后端启动
 
 ```bash
+git submodule update --init mattergen
+
 cd backend
 cp .env.example .env
 # 编辑 .env 填入 API keys
 
-uv sync
-uv run uvicorn main:app --reload
+# 首次安装后端依赖时，将依赖增量安装到 MatterGen 环境
+source ../mattergen/.venv/bin/activate
+uv sync --active --inexact
+
+# 启动后端
+../mattergen/.venv/bin/python -m uvicorn main:app \
+  --reload --host 0.0.0.0 --port 8000
 ```
+
+MatterGen 使用独立 Python 3.10 环境。不要运行 `uv sync --reinstall`，避免重新安装 PyTorch、PyG 和 MatterSim。
 
 ### 4. 前端启动
 
@@ -95,6 +106,10 @@ npm run dev
               ▼                       ▼                       ▼
         ChatTool            MaterialSearch         ElementSubstitution
      材料科学问答            晶体结构查询              元素替换/掺杂
+                                      │
+                                      ▼
+                            MaterialGeneration
+                            MatterGen 候选生成
 ```
 
 **核心组件:**
@@ -105,6 +120,7 @@ npm run dev
 | **ChatTool** | `backend/skills/chat.py` | 材料科学领域对话 |
 | **MaterialSearchTool** | `backend/skills/material_search.py` | 查询 Materials Project 数据库 |
 | **ElementSubstitutionTool** | `backend/skills/element_substitution.py` | 元素替换/掺杂 |
+| **MaterialGenerationTool** | `backend/skills/material_generation.py` | 提交 MatterGen 磁性材料生成任务 |
 
 **意图识别示例:**
 
@@ -115,6 +131,7 @@ npm run dev
 | "什么是带隙？" | `chat` | 纯文本解释 |
 | "哪些材料适合做永磁体？" | `chat` | 材料推荐 |
 | "把 Nd2Fe14B 中的 Fe 替换成 Co" | `element_substitution` | 显示 Nd2Co14B 结构 |
+| "生成磁密度约 0.15 的候选材料" | `material_generation` | 创建后台生成任务 |
 
 ### 项目结构
 
@@ -133,13 +150,18 @@ material-sandbox/
 │   ├── skills/            # LangChain Tools
 │   │   ├── chat.py
 │   │   ├── material_search.py
-│   │   └── element_substitution.py
+│   │   ├── element_substitution.py
+│   │   └── material_generation.py
+│   ├── generation/        # 后台生成任务、Worker 和 CIF 后处理
+│   ├── artifacts/         # 运行时任务和候选结构
 │   └── pyproject.toml
 │
+├── mattergen/             # MatterGen 推理运行时
 └── doc/                   # 项目文档
     ├── frontend.png
     ├── backend.md         # 后端详细文档
-    └── element_substitution.md  # 元素替换工具文档
+    ├── element_substitution.md  # 元素替换工具文档
+    └── mattergen-integration-refactor-plan.md
 ```
 
 ## ❓ 常见问题
@@ -160,6 +182,12 @@ material-sandbox/
 
 在 `backend/skills/` 下创建新文件继承 `BaseTool`，然后在 `agent.py` 中注册即可。
 
+### 如何进行磁性材料生成？
+
+在 AI 助手中输入类似“生成磁密度约 0.15 的候选材料”。Agent 会创建后台任务，前端显示进度；完成后的候选可以点击并在 3D 视图中查看。
+
+MatterGen 的条件生成不代表目标磁密度已经得到验证，后续仍需独立磁性预测器或 DFT 计算。
+
 ## 🐛 故障排除
 
 | 问题 | 解决方案 |
@@ -168,11 +196,14 @@ material-sandbox/
 | `Insufficient Balance` | LLM API 余额不足，需充值或更换 Key |
 | `401 Unauthorized` | 检查 `.env` 中 API Key 是否正确 |
 | 3D 画布不显示 | 使用 Chrome/Firefox/Edge 最新版 |
+| `No module named 'pkg_resources'` | 确认 `setuptools<81` 已安装且没有重装 MatterGen 环境 |
+| MatterGen Worker 启动失败 | 检查 `MATTERGEN_MODEL_PATH` 和 checkpoint 文件大小 |
 
 **后端调试:**
 ```bash
 cd backend
-uv run uvicorn main:app --reload --log-level debug
+../mattergen/.venv/bin/python -m uvicorn main:app \
+  --reload --log-level debug
 ```
 
 ## 📖 学习资源
@@ -180,6 +211,7 @@ uv run uvicorn main:app --reload --log-level debug
 - [LangChain 官方文档](https://python.langchain.com/)
 - [LangGraph 文档](https://langchain-ai.github.io/langgraph/)
 - [后端详细文档](doc/backend.md)
+- [MatterGen 集成重构方案](doc/mattergen-integration-refactor-plan.md)
 
 ## 📄 许可证
 

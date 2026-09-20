@@ -2,8 +2,14 @@
 材料搜索工具 - 基于 LangChain Tool 接口封装 Materials Project API
 """
 import os
+from pathlib import Path
 from typing import Type, Optional
 from pydantic import BaseModel, Field
+
+os.environ.setdefault(
+    "MPLCONFIGDIR",
+    str(Path(__file__).resolve().parents[1] / "artifacts" / "matplotlib"),
+)
 
 from langchain_core.tools import BaseTool
 from mp_api.client import MPRester

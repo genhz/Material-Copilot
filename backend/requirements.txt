@@ -1,7 +1,0 @@
-fastapi
-uvicorn
-openai>=1.0.0
-mp-api
-pymatgen
-pydantic
-python-dotenv

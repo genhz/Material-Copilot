@@ -26,3 +26,10 @@ dist-ssr
 
 __pycache__
 .env
+.pytest_cache
+
+# MatterGen runtime artifacts
+backend/artifacts/
+backend/results/
+mattergen/results/
+*.ckpt.lfs-pointer

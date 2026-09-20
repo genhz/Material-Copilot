@@ -29,10 +29,18 @@ backend/
 │   ├── __init__.py
 │   ├── chat.py          # ChatTool - 对话工具
 │   ├── material_search.py  # MaterialSearchTool - 材料搜索
-│   └── element_substitution.py  # ElementSubstitutionTool - 元素替换
+│   ├── element_substitution.py  # ElementSubstitutionTool - 元素替换
+│   └── material_generation.py  # MaterialGenerationTool - 材料生成
+├── generation/
+│   ├── adapter.py       # MatterGen 调用封装
+│   ├── manager.py       # 任务管理
+│   ├── worker.py        # 独立推理进程
+│   ├── evaluator.py     # CIF 后处理
+│   ├── store.py         # 文件任务存储
+│   └── router.py        # 生成 API
 ├── pyproject.toml       # 依赖配置
 ├── .env                 # 环境变量 (API Keys)
-└── test_agent.py        # 测试脚本
+└── tests/               # 测试
 ```
 
 ## 安装与运行
@@ -41,8 +49,11 @@ backend/
 
 ```bash
 cd backend
-uv sync
+source ../mattergen/.venv/bin/activate
+uv sync --active --inexact
 ```
+
+不要创建 `backend/.venv`，也不要执行 `uv sync --reinstall`。MatterGen、PyTorch、PyG 和 MatterSim 已经安装在 `mattergen/.venv`。
 
 ### 2. 配置 LLM
 
@@ -74,13 +85,14 @@ MP_API_KEY=xxxxxxxx
 ### 4. 启动服务
 
 ```bash
-uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000
+../mattergen/.venv/bin/python -m uvicorn main:app \
+  --reload --host 0.0.0.0 --port 8000
 ```
 
 ### 5. 测试 Agent
 
 ```bash
-uv run python test_agent.py
+../mattergen/.venv/bin/python -m pytest
 ```
 
 ## LLM 配置管理
@@ -106,6 +118,11 @@ print(f"API Key: {config.api_key}")   # e.g. "sk-..."
 | `LLM_BASE_URL` | LLM API 基础 URL |
 | `LLM_MODEL` | 模型名称 |
 | `MP_API_KEY` | Materials Project API 密钥 |
+| `MATTERGEN_ENABLED` | 是否启用 MatterGen 生成功能 |
+| `MATTERGEN_MODEL_ID` | 模型 ID，首版为 `dft_mag_density` |
+| `MATTERGEN_MODEL_PATH` | 本地 checkpoint 目录 |
+| `MATTERGEN_MAX_CONCURRENCY` | Worker 最大并发，首版固定为 1 |
+| `MATTERGEN_WORKER_TIMEOUT_SECONDS` | Worker 超时时间 |
 
 ## LangChain 核心概念
 
@@ -130,7 +147,12 @@ from langgraph.prebuilt import create_react_agent
 
 agent = create_react_agent(
     model=llm,
-    tools=[MaterialSearchTool(), ChatTool(), ElementSubstitutionTool()],
+    tools=[
+        MaterialSearchTool(),
+        ChatTool(),
+        ElementSubstitutionTool(),
+        MaterialGenerationTool(),
+    ],
     prompt="你是一个材料科学助手..."
 )
 ```
@@ -140,6 +162,20 @@ agent = create_react_agent(
 ```python
 result = await agent.ainvoke({"messages": [...]})
 ```
+
+### 4. MatterGen 生成
+
+生成任务通过以下接口管理：
+
+```text
+POST   /api/generation/jobs
+GET    /api/generation/jobs/{job_id}
+GET    /api/generation/jobs/{job_id}/candidates
+POST   /api/generation/jobs/{job_id}/cancel
+GET    /api/generation/models
+```
+
+Agent 的 `material_generation` Tool 只负责提交任务并返回 `job_id`。实际推理由 `generation.worker` 独立进程执行。
 
 ## 学习要点
 
@@ -162,9 +198,18 @@ A: 对于只有几个工具的小项目，确实有些过度设计。但作为�
 
 A: 直接修改 `.env` 文件中的 `LLM_API_KEY`、`LLM_BASE_URL` 和 `LLM_MODEL` 三个值即可。
 
+### Q: 为什么后端使用 MatterGen 的虚拟环境？
+
+A: MatterGen 对 Python、PyTorch、PyG 和 pymatgen 的版本约束较强。直接复用 `mattergen/.venv` 可以避免重新安装大型依赖，也能保证本地模型权重可以直接加载。
+
+### Q: MatterGen 条件生成是否等于磁性预测？
+
+A: 不是。`dft_mag_density` 是生成条件，不保证生成结果达到目标磁密度。后续仍需独立磁性预测模型或 DFT 验证。
+
 ## 相关文档
 
 - [元素替换工具](element_substitution.md) - 详细说明元素替换/掺杂功能
+- [MatterGen 集成重构方案](mattergen-integration-refactor-plan.md) - 完整需求、架构与验收标准
 
 ## 参考资源
 

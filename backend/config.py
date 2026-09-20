@@ -5,6 +5,8 @@ LLM 配置管理 - 从环境变量加载 LLM 配置
 """
 import os
 from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
 from typing import Optional
 from dotenv import load_dotenv
 
@@ -77,3 +79,61 @@ def reload_llm_config() -> LLMConfig:
     global _config
     _config = LLMConfig.load()
     return _config
+
+
+@dataclass(frozen=True)
+class MatterGenConfig:
+    """MatterGen runtime configuration."""
+
+    enabled: bool
+    model_id: str
+    model_path: Path
+    artifact_root: Path
+    max_concurrency: int
+    job_retention_days: int
+    worker_timeout_seconds: int
+
+    @classmethod
+    def load(cls) -> "MatterGenConfig":
+        backend_root = Path(__file__).resolve().parent
+        repo_root = backend_root.parent
+
+        default_model_path = (
+            repo_root / "mattergen" / "checkpoints" / "dft_mag_density"
+        )
+        default_artifact_root = backend_root / "artifacts" / "generation"
+
+        return cls(
+            enabled=os.getenv("MATTERGEN_ENABLED", "true").lower()
+            in {"1", "true", "yes", "on"},
+            model_id=os.getenv("MATTERGEN_MODEL_ID", "dft_mag_density"),
+            model_path=Path(
+                os.getenv("MATTERGEN_MODEL_PATH", str(default_model_path))
+            ).expanduser().resolve(),
+            artifact_root=Path(
+                os.getenv("MATTERGEN_ARTIFACT_ROOT", str(default_artifact_root))
+            ).expanduser().resolve(),
+            max_concurrency=max(
+                1, int(os.getenv("MATTERGEN_MAX_CONCURRENCY", "1"))
+            ),
+            job_retention_days=max(
+                1, int(os.getenv("MATTERGEN_JOB_RETENTION_DAYS", "7"))
+            ),
+            worker_timeout_seconds=max(
+                1, int(os.getenv("MATTERGEN_WORKER_TIMEOUT_SECONDS", "7200"))
+            ),
+        )
+
+
+@lru_cache
+def get_mattergen_config() -> MatterGenConfig:
+    """Load MatterGen configuration once per process."""
+
+    return MatterGenConfig.load()
+
+
+def reload_mattergen_config() -> MatterGenConfig:
+    """Reload MatterGen configuration for tests and hot updates."""
+
+    get_mattergen_config.cache_clear()
+    return get_mattergen_config()

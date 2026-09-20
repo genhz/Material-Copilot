@@ -6,6 +6,7 @@ import type { MaterialData } from '../../types/material'
 
 const emit = defineEmits<{
   materialFound: [data: MaterialData, action: 'chat' | 'render']
+  generationStarted: [jobId: string]
 }>()
 
 const { messages, isChatting, sendMessage, clearChat } = useAIChat()
@@ -19,8 +20,14 @@ const handleSend = async () => {
   inputMessage.value = ''
 
   const result = await sendMessage(text)
-  if (result.materialData) {
-    emit('materialFound', result.materialData, result.action)
+  if (result.action === 'generate' && result.jobId) {
+    emit('generationStarted', result.jobId)
+  } else if (result.materialData) {
+    emit(
+      'materialFound',
+      result.materialData,
+      result.action === 'render' ? 'render' : 'chat'
+    )
   }
 }
 

@@ -6,7 +6,7 @@ readme = "README.md"
 authors = [
     { name = "genhz", email = "2206353308@qq.com" }
 ]
-requires-python = ">=3.13"
+requires-python = ">=3.10,<3.11"
 dependencies = [
     "fastapi>=0.104.0",
     "uvicorn[standard]>=0.24.0",
@@ -14,10 +14,12 @@ dependencies = [
     "langchain-openai>=0.2.0",
     "langchain-community>=0.3.0",
     "langgraph>=0.2.0",
-    "mp-api>=0.38.0",
-    "pymatgen>=2023.0.0",
+    "mp-api==0.43.0",
+    "pymatgen==2024.10.29",
+    "numpy==1.26.4",
     "pydantic>=2.0.0",
     "python-dotenv>=1.0.0",
+    "setuptools<81",
 ]
 
 [project.scripts]
@@ -32,3 +34,7 @@ dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

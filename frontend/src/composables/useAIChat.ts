@@ -3,7 +3,7 @@
  * 管理 AI 助手的会话状态
  */
 import { ref } from 'vue'
-import type { ChatMessage, MaterialData } from '../types/material'
+import type { ChatAction, ChatMessage, MaterialData } from '../types/material'
 import { chatAI } from '../api/material'
 
 const messages = ref<ChatMessage[]>([])
@@ -19,10 +19,13 @@ export function useAIChat() {
    */
   async function sendMessage(text: string): Promise<{
     materialData: MaterialData | null
-    action: 'chat' | 'render'
+    action: ChatAction
+    jobId: string | null
   }> {
     const trimmed = text.trim()
-    if (!trimmed || isChatting.value) return { materialData: null, action: 'chat' }
+    if (!trimmed || isChatting.value) {
+      return { materialData: null, action: 'chat', jobId: null }
+    }
 
     // 添加用户消息
     messages.value.push({
@@ -47,8 +50,13 @@ export function useAIChat() {
 
       const materialData = response.material_data || null
       const action = response.action || 'chat'
+      const jobId = response.job_id || null
 
-      console.log('[useAIChat] 收到响应:', { action, formula: materialData?.formula })
+      console.log('[useAIChat] 收到响应:', {
+        action,
+        formula: materialData?.formula,
+        jobId,
+      })
 
       // 添加助手回复
       messages.value.push({
@@ -58,14 +66,14 @@ export function useAIChat() {
         materialData,
       })
 
-      return { materialData, action }
+      return { materialData, action, jobId }
     } catch (error: any) {
       messages.value.push({
         id: messageIdCounter++,
         role: 'assistant',
         content: `请求失败：${error.message || '未知错误'}`,
       })
-      return { materialData: null, action: 'chat' }
+      return { materialData: null, action: 'chat', jobId: null }
     } finally {
       isChatting.value = false
     }

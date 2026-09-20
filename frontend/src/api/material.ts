@@ -2,7 +2,14 @@
  * 材料 API 请求层
  */
 import axios from 'axios'
-import type { MaterialData, ChatRequest, ChatResponse } from '../types/material'
+import type {
+  CandidateCollection,
+  ChatRequest,
+  ChatResponse,
+  GenerationJob,
+  GenerationRequest,
+  MaterialData,
+} from '../types/material'
 
 const api = axios.create({
   baseURL: '', // 使用 Vite 代理
@@ -51,4 +58,46 @@ export async function chatAI(request: ChatRequest): Promise<ChatResponse> {
  */
 export async function clearSession(sessionId: string): Promise<void> {
   await api.post('/api/chat/clear', null, { params: { session_id: sessionId } })
+}
+
+/**
+ * 创建 MatterGen 磁性材料生成任务
+ */
+export async function createGenerationJob(
+  request: GenerationRequest
+): Promise<GenerationJob> {
+  const resp = await api.post<GenerationJob>('/api/generation/jobs', request)
+  return resp.data
+}
+
+/**
+ * 查询生成任务状态
+ */
+export async function getGenerationJob(jobId: string): Promise<GenerationJob> {
+  const resp = await api.get<GenerationJob>(
+    `/api/generation/jobs/${encodeURIComponent(jobId)}`
+  )
+  return resp.data
+}
+
+/**
+ * 获取已完成任务的候选结构
+ */
+export async function getGenerationCandidates(
+  jobId: string
+): Promise<CandidateCollection> {
+  const resp = await api.get<CandidateCollection>(
+    `/api/generation/jobs/${encodeURIComponent(jobId)}/candidates`
+  )
+  return resp.data
+}
+
+/**
+ * 取消生成任务
+ */
+export async function cancelGenerationJob(jobId: string): Promise<GenerationJob> {
+  const resp = await api.post<GenerationJob>(
+    `/api/generation/jobs/${encodeURIComponent(jobId)}/cancel`
+  )
+  return resp.data
 }

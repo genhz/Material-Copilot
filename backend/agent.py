@@ -9,7 +9,14 @@ LangChain Agent 工作流 - 使用 ReAct Agent 进行意图识别和工具调用
 """
 import json
 import logging
+import os
+from pathlib import Path
 from typing import Optional, List, Dict
+
+os.environ.setdefault(
+    "MPLCONFIGDIR",
+    str(Path(__file__).resolve().parent / "artifacts" / "matplotlib"),
+)
 
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, BaseMessage
@@ -18,6 +25,7 @@ from langgraph.prebuilt import create_react_agent
 from skills.material_search import MaterialSearchTool, MaterialSearchResult
 from skills.chat import ChatTool
 from skills.element_substitution import ElementSubstitutionTool
+from skills.material_generation import MaterialGenerationTool
 from config import get_llm_config
 
 logger = logging.getLogger(__name__)
@@ -35,7 +43,12 @@ AGENT_SYSTEM_PROMPT = """你是一个材料科学助手，拥有以下工具：
    - 例如："把 Fe 替换成 Co"、"用 La 替代 Nd"、"将 Nd2Fe14B 中的 Fe 全部替换为 Co"
    - 需要提供当前材料的 CIF 文件和替换规则，返回替换后的新结构和化学式
 
-请根据用户的问题自动选择合适的工具。如果用户的问题涉及具体材料的结构数据，使用 material_search；如果是概念性讨论或材料推荐，使用 chat；如果需要修改元素组成，使用 element_substitution。
+4. **material_generation**: 根据目标磁密度生成新的无机材料候选结构。
+   - 例如："生成磁密度约 0.15 的磁性材料"、"设计两个高磁密度候选材料"
+   - 该工具只创建后台任务并返回 job_id，不会等待生成完成
+   - 不用于预测已有材料的磁密度
+
+请根据用户的问题自动选择合适的工具。如果用户的问题涉及具体材料的结构数据，使用 material_search；如果是概念性讨论或材料推荐，使用 chat；如果需要修改已有材料元素组成，使用 element_substitution；如果用户要求生成或设计新的磁性材料候选，使用 material_generation。
 
 始终使用中文回复用户。"""
 
@@ -71,6 +84,7 @@ class MaterialAgent:
                 MaterialSearchTool(),
                 ChatTool(),
                 ElementSubstitutionTool(),
+                MaterialGenerationTool(),
             ]
         return self._tools
 
@@ -125,6 +139,7 @@ class MaterialAgent:
             output_messages = result.get("messages", [])
             output = ""
             material_data = None
+            job_id = None
             action = "chat"
 
             # 遍历消息，提取工具调用结果和最终回复
@@ -152,6 +167,15 @@ class MaterialAgent:
                         except Exception as e:
                             logger.warning(f"解析元素替换结果失败：{e}")
 
+                    elif name == "material_generation":
+                        try:
+                            output_data = json.loads(content)
+                            if output_data.get("job_id"):
+                                action = "generate"
+                                job_id = output_data["job_id"]
+                        except Exception as e:
+                            logger.warning(f"解析材料生成结果失败：{e}")
+
                 elif msg_type == "ai":
                     # AI 回复
                     output = getattr(msg, "content", output)
@@ -171,6 +195,7 @@ class MaterialAgent:
                 reply=output,
                 action=action,
                 material_data=material_data,
+                job_id=job_id,
             )
 
         except Exception as e:
@@ -179,6 +204,7 @@ class MaterialAgent:
                 reply=f"处理请求时发生错误：{str(e)}",
                 action="chat",
                 material_data=None,
+                job_id=None,
             )
 
 
@@ -188,12 +214,14 @@ class AgentResult:
     def __init__(
         self,
         reply: str,
-        action: str,  # "chat" 或 "render"
+        action: str,  # "chat" | "render" | "generate"
         material_data=None,
+        job_id: Optional[str] = None,
     ):
         self.reply = reply
         self.action = action
         self.material_data = material_data
+        self.job_id = job_id
 
     def to_dict(self) -> dict:
         """转换为字典"""
@@ -201,6 +229,7 @@ class AgentResult:
             "reply": self.reply,
             "action": self.action,
             "material_data": self.material_data.to_dict() if self.material_data else None,
+            "job_id": self.job_id,
         }
 
 

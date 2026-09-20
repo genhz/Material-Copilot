@@ -16,8 +16,14 @@
 import os
 import json
 import logging
+from pathlib import Path
 from typing import Type, Optional, Dict, List, Tuple
 from pydantic import BaseModel, Field
+
+os.environ.setdefault(
+    "MPLCONFIGDIR",
+    str(Path(__file__).resolve().parents[1] / "artifacts" / "matplotlib"),
+)
 
 from langchain_core.tools import BaseTool
 from pymatgen.core.structure import Structure

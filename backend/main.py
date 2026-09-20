@@ -12,7 +12,14 @@ import os
 import json
 import logging
 import uuid
+from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Optional
+
+os.environ.setdefault(
+    "MPLCONFIGDIR",
+    str(Path(__file__).resolve().parent / "artifacts" / "matplotlib"),
+)
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,6 +27,8 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 
 from agent import execute_agent, AgentResult
+from generation.manager import get_generation_manager
+from generation.router import router as generation_router
 from skills.material_search import MaterialSearchResult
 
 load_dotenv()
@@ -27,8 +36,26 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    """Initialize and clean up generation workers."""
+
+    manager = get_generation_manager()
+    await manager.startup()
+    try:
+        yield
+    finally:
+        await manager.shutdown()
+
+
 # ── FastAPI 应用 ──────────────────────────────────────────────
-app = FastAPI(title="材料结构检索沙盘 (LangChain Agent 版)", version="1.0.0")
+app = FastAPI(
+    title="材料结构检索沙盘 (LangChain Agent 版)",
+    version="1.1.0",
+    lifespan=lifespan,
+)
+
+app.include_router(generation_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -64,8 +91,9 @@ class MaterialData(BaseModel):
 
 class ChatResponse(BaseModel):
     reply: str
-    action: str  # "chat" | "render"
+    action: str  # "chat" | "render" | "generate"
     material_data: Optional[MaterialData] = None
+    job_id: Optional[str] = None
     session_id: Optional[str] = None
 
 
@@ -153,6 +181,7 @@ async def chat(request: ChatRequest):
             reply=result.reply,
             action=result.action,
             material_data=material_data,
+            job_id=result.job_id,
             session_id=session_id,
         )
 
@@ -164,6 +193,7 @@ async def chat(request: ChatRequest):
             reply=error_reply,
             action="chat",
             material_data=None,
+            job_id=None,
             session_id=session_id,
         )
 

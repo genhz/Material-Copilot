@@ -1,0 +1,3 @@
+[submodule "mattergen"]
+	path = mattergen
+	url = git@github.com:microsoft/mattergen.git

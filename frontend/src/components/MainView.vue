@@ -5,8 +5,9 @@ import SearchBar from './crystal/SearchBar.vue'
 import CrystalViewer from './crystal/CrystalViewer.vue'
 import MaterialPanel from './data/MaterialPanel.vue'
 import AIAssistant from './chat/AIAssistant.vue'
+import GenerationPanel from './generation/GenerationPanel.vue'
 import { useMaterialSearch } from '../composables/useMaterialSearch'
-import type { MaterialData } from '../types/material'
+import type { GeneratedCandidate, MaterialData } from '../types/material'
 
 interface Props {
   isDarkMode: boolean
@@ -27,6 +28,7 @@ const {
 } = useMaterialSearch()
 
 const showCharts = ref(false)
+const activeGenerationJobId = ref<string | null>(null)
 
 const handleSearch = (formula: string) => {
   doSearch(formula)
@@ -49,6 +51,30 @@ const handleMaterialFound = (data: MaterialData, action: 'chat' | 'render') => {
 
 const handleThemeToggle = () => {
   emit('toggleTheme')
+}
+
+const handleGenerationStarted = (jobId: string) => {
+  activeGenerationJobId.value = jobId
+}
+
+const handleGeneratedCandidate = (candidate: GeneratedCandidate) => {
+  setMaterial({
+    formula: candidate.formula,
+    material_id: candidate.material_id,
+    band_gap: null,
+    is_magnetic: null,
+    formation_energy: null,
+    cif: candidate.cif,
+    density: candidate.density,
+    spacegroup_symbol: candidate.spacegroup_symbol,
+    spacegroup_number: candidate.spacegroup_number,
+    crystal_system: candidate.crystal_system,
+    formula_unit: candidate.formula_unit,
+    magnetic_ordering: null,
+    elements: candidate.elements,
+    pretty_formula: candidate.pretty_formula,
+  })
+  activeGenerationJobId.value = null
 }
 </script>
 
@@ -177,8 +203,19 @@ const handleThemeToggle = () => {
       🖱️ 拖拽旋转 · 滚轮缩放 · 右键平移
     </div>
 
+    <!-- MatterGen Candidate Panel -->
+    <GenerationPanel
+      v-if="activeGenerationJobId"
+      :job-id="activeGenerationJobId"
+      @select-candidate="handleGeneratedCandidate"
+      @close="activeGenerationJobId = null"
+    />
+
     <!-- AI Assistant (Top Layer) -->
-    <AIAssistant @material-found="handleMaterialFound" />
+    <AIAssistant
+      @material-found="handleMaterialFound"
+      @generation-started="handleGenerationStarted"
+    />
   </div>
 </template>
 
