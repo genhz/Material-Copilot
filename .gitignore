@@ -26,10 +26,16 @@ dist-ssr
 
 __pycache__
 .env
+.venv/
 .pytest_cache
 
 # MatterGen runtime artifacts
 backend/artifacts/
 backend/results/
-mattergen/results/
+backend/vendor/mattergen/results/
+backend/vendor/mattergen/mattergen.egg-info/
+backend/vendor/mattergen/checkpoints/**/*.ckpt
+backend/vendor/mattergen/data-release/alex-mp/*.zip
+backend/vendor/mattergen/data-release/alex-mp/*.gz
+backend/vendor/mattergen/data-release/mp-20/*.zip
 *.ckpt.lfs-pointer

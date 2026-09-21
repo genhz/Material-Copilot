@@ -22,6 +22,7 @@
 
 ```
 backend/
+├── .venv/               # Python 3.10 统一环境
 ├── main.py              # FastAPI 入口
 ├── agent.py             # LangChain Agent 封装
 ├── config.py            # LLM 配置管理
@@ -38,6 +39,8 @@ backend/
 │   ├── evaluator.py     # CIF 后处理
 │   ├── store.py         # 文件任务存储
 │   └── router.py        # 生成 API
+├── vendor/
+│   └── mattergen/       # MatterGen 源码、配置和本地权重
 ├── pyproject.toml       # 依赖配置
 ├── .env                 # 环境变量 (API Keys)
 └── tests/               # 测试
@@ -49,11 +52,10 @@ backend/
 
 ```bash
 cd backend
-source ../mattergen/.venv/bin/activate
-uv sync --active --inexact
+uv sync
 ```
 
-不要创建 `backend/.venv`，也不要执行 `uv sync --reinstall`。MatterGen、PyTorch、PyG 和 MatterSim 已经安装在 `mattergen/.venv`。
+不要执行 `uv sync --reinstall`。MatterGen 源码位于 `backend/vendor/mattergen/`，MatterGen、PyTorch、PyG 和 MatterSim 已经安装在 `backend/.venv`。
 
 ### 2. 配置 LLM
 
@@ -85,14 +87,14 @@ MP_API_KEY=xxxxxxxx
 ### 4. 启动服务
 
 ```bash
-../mattergen/.venv/bin/python -m uvicorn main:app \
+.venv/bin/python -m uvicorn main:app \
   --reload --host 0.0.0.0 --port 8000
 ```
 
 ### 5. 测试 Agent
 
 ```bash
-../mattergen/.venv/bin/python -m pytest
+.venv/bin/python -m pytest
 ```
 
 ## LLM 配置管理
@@ -200,7 +202,7 @@ A: 直接修改 `.env` 文件中的 `LLM_API_KEY`、`LLM_BASE_URL` 和 `LLM_MODE
 
 ### Q: 为什么后端使用 MatterGen 的虚拟环境？
 
-A: MatterGen 对 Python、PyTorch、PyG 和 pymatgen 的版本约束较强。直接复用 `mattergen/.venv` 可以避免重新安装大型依赖，也能保证本地模型权重可以直接加载。
+A: MatterGen 对 Python、PyTorch、PyG 和 pymatgen 的版本约束较强。后端直接复用内置的 `backend/.venv`，避免重新安装大型依赖，也能保证本地模型权重可以直接加载。
 
 ### Q: MatterGen 条件生成是否等于磁性预测？
 

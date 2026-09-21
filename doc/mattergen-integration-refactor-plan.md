@@ -15,7 +15,7 @@
 
 1. 在现有后端中接入 MatterGen 的磁性材料候选生成能力。
 2. 直接复用已经安装好的 MatterGen Python 3.10 环境，不重新安装 PyTorch 等大型依赖。
-3. 不创建新的后端虚拟环境，不使用 `backend/.venv`。
+3. 统一使用 `backend/.venv`，不创建新的虚拟环境。
 4. 保留现有材料查询、AI 聊天和元素替换功能。
 5. 将 MatterGen 推理作为独立后台任务执行，不能阻塞 FastAPI 主进程。
 6. 第一版只接入 `dft_mag_density` 模型和 `dft_mag_density` 条件。
@@ -91,7 +91,7 @@ MatterGen 不是传统意义上的“给定结构预测属性”模型。它主�
 本次使用的模型：
 
 ```text
-checkpoint: mattergen/checkpoints/dft_mag_density
+checkpoint: backend/vendor/mattergen/checkpoints/dft_mag_density
 condition: dft_mag_density
 model: MatterGen 1.0.3
 ```
@@ -103,7 +103,7 @@ model: MatterGen 1.0.3
 本地权重路径：
 
 ```text
-/Users/genhz/Documents/code/material-sandbox/mattergen/checkpoints/dft_mag_density/checkpoints/last.ckpt
+/Users/genhz/Documents/code/material-sandbox/backend/vendor/mattergen/checkpoints/dft_mag_density/checkpoints/last.ckpt
 ```
 
 已验证文件：
@@ -116,7 +116,7 @@ sha256: 01dd3e86805165412e0810e2a77a4756f8e1020f3ff2707c74af0a3f88a1bb8e
 当前目录还包含：
 
 ```text
-mattergen/checkpoints/dft_mag_density/checkpoints/last.ckpt.lfs-pointer
+backend/vendor/mattergen/checkpoints/dft_mag_density/checkpoints/last.ckpt.lfs-pointer
 ```
 
 该文件是原 Git LFS 指针备份。执行 Agent 不要删除、覆盖或重新执行 Git LFS checkout。
@@ -126,7 +126,7 @@ mattergen/checkpoints/dft_mag_density/checkpoints/last.ckpt.lfs-pointer
 ### 3.1 唯一允许使用的 Python 环境
 
 ```text
-/Users/genhz/Documents/code/material-sandbox/mattergen/.venv
+/Users/genhz/Documents/code/material-sandbox/backend/.venv
 ```
 
 当前版本：
@@ -148,13 +148,10 @@ emmet-core: 0.85.1
 
 该环境已经能够成功加载 `dft_mag_density` 权重并执行 MatterGen 扩散采样。
 
-### 3.2 不允许使用的环境
+### 3.2 已移除的旧环境
 
-```text
-/Users/genhz/Documents/code/material-sandbox/backend/.venv
-```
-
-该环境是 Python 3.13 后端环境，不再作为统一运行环境使用。
+原 Python 3.13 `backend/.venv` 已删除。原 `mattergen/.venv` 已迁移为
+`backend/.venv`，现在同时承载后端和 MatterGen。
 
 ### 3.3 环境操作硬性约束
 
@@ -164,61 +161,45 @@ emmet-core: 0.85.1
 - 不创建新的 Python 环境
 - 不执行 `uv sync --reinstall`
 - 不重新安装 PyTorch、PyG、MatterSim 或 MatterGen
-- 不执行会移除 MatterGen 额外依赖的 `uv sync`
-- 不删除 `mattergen/.venv`
-- 不删除 `backend/.venv`，但也不要使用它
-- 不使用 `uv run` 启动后端，避免 uv 自动创建 `backend/.venv`
+- 不删除 `backend/.venv`
+- 不使用 `uv run` 启动后端，统一使用 `backend/.venv/bin/python`
 - 不进行 `.venv` 备份
 - 不提交 `.venv`
 
-允许的安装方式是向现有 MatterGen 环境增量补充后端缺少的依赖：
+允许并推荐使用普通 `uv sync`。MatterGen 已声明为后端路径依赖，因此 uv
+不会再把它当成多余包删除：
 
 ```bash
 cd /Users/genhz/Documents/code/material-sandbox/backend
-source ../mattergen/.venv/bin/activate
-uv sync --active --inexact
+uv sync
 ```
 
-`--inexact` 是必须的，它用于保留 MatterGen、PyTorch、MatterSim 等不属于后端项目声明的包。
+首次执行时，此命令会根据 `uv.lock` 恢复 MatterGen、PyTorch、PyG、
+MatterSim 及后端依赖；后续执行只校验环境。
 
-## 4. MatterGen 子仓库状态
+## 4. MatterGen 源码状态
 
-父仓库当前把 MatterGen 记录为 gitlink：
+MatterGen 已从根目录迁移到：
 
 ```text
-commit: 92423660a8bd70e83679086e88f88596d484dc16
-path: mattergen
+backend/vendor/mattergen/
 ```
 
-当前父仓库缺少 `.gitmodules`。这意味着在全新克隆的环境中，Git 无法自动恢复 MatterGen 子仓库。
+原根目录 `mattergen/`、Git gitlink 和 `.gitmodules` 已移除。嵌套的
+`backend/vendor/mattergen/.git` 也已移除，因此 MatterGen 现在是后端仓库中的普通源码目录。
 
-执行 Agent 必须处理以下事项之一：
+必须保留：
 
-### 推荐方案
+- `backend/vendor/mattergen/mattergen/` 源码
+- `backend/vendor/mattergen/checkpoints/dft_mag_density/config.yaml`
+- `backend/vendor/mattergen/checkpoints/dft_mag_density/checkpoints/last.ckpt`
+- MatterGen 的 MIT License 和 NOTICE
 
-将该目录正式注册为 Git submodule，并固定到现有 commit：
-
-```text
-url: git@github.com:microsoft/mattergen.git
-path: mattergen
-commit: 92423660a8bd70e83679086e88f88596d484dc16
-```
-
-### 替代方案
-
-如果本次任务不允许修改 Git 结构，则必须在 README 中明确：
-
-- MatterGen 是外部依赖
-- 需要单独 clone
-- 必须固定在上述 commit
-- 后端依赖该目录的本地路径
-
-不得对 MatterGen 子仓库执行：
+不得对已迁移目录执行：
 
 - `git reset --hard`
 - `git clean`
-- `git lfs pull`
-- `git checkout`
+- Git LFS checkout
 - 覆盖 `last.ckpt`
 - 删除 `last.ckpt.lfs-pointer`
 
@@ -271,7 +252,7 @@ commit: 92423660a8bd70e83679086e88f88596d484dc16
 API 和 MatterGen 推理共用同一个 Python 环境，但必须运行在两个进程中：
 
 ```text
-mattergen/.venv/bin/python
+backend/.venv/bin/python
     ├── FastAPI API 进程
     │     ├── 参数校验
     │     ├── 任务提交
@@ -328,6 +309,7 @@ API 收到任务
 
 ```text
 backend/
+├── .venv/                 # Python 3.10 统一环境
 ├── .python-version
 ├── pyproject.toml
 ├── uv.lock
@@ -350,6 +332,8 @@ backend/
 │   ├── material_search.py
 │   ├── element_substitution.py
 │   └── material_generation.py
+├── vendor/
+│   └── mattergen/         # 内置 MatterGen 源码、配置和本地权重
 └── artifacts/
     └── generation/
 ```
@@ -377,10 +361,25 @@ dependencies = [
     "numpy==1.26.4",
     "pydantic>=2.0.0",
     "python-dotenv>=1.0.0",
+    "setuptools<81",
+    "mattergen",
+    "torch==2.4.1; sys_platform == 'darwin'",
+    "torch_cluster",
+    "torch_scatter",
+    "torch_sparse",
 ]
 ```
 
-不要将 MatterGen 声明为后端路径依赖。MatterGen 是预先配置的外部运行时，声明路径依赖可能导致 uv 重新解析并重装 PyTorch/PyG。
+必须同时声明：
+
+```toml
+[tool.uv.sources]
+mattergen = { path = "vendor/mattergen", editable = true }
+```
+
+并为 `torch_cluster`、`torch_scatter` 和 `torch_sparse` 提供 PyG 预编译
+wheel 源。锁文件只针对 `darwin` 和 `linux` 解析，避免 uv 为 Windows
+源码构建 PyG 扩展。
 
 ### 8.2 Python 版本文件
 
@@ -395,13 +394,12 @@ dependencies = [
 ```bash
 cd /Users/genhz/Documents/code/material-sandbox/backend
 uv lock
-source ../mattergen/.venv/bin/activate
-uv sync --active --inexact
+uv sync
 ```
 
 执行 Agent 必须确认没有发生以下行为：
 
-- 没有创建 `backend/.venv`
+- 使用现有 `backend/.venv`
 - 没有卸载 MatterGen
 - 没有重新安装 PyTorch
 - 没有修改 MatterSim
@@ -412,14 +410,14 @@ uv sync --active --inexact
 ```bash
 cd /Users/genhz/Documents/code/material-sandbox/backend
 
-../mattergen/.venv/bin/python -c \
+.venv/bin/python -c \
   "import sys, fastapi, langchain, pymatgen, numpy, torch, mattergen; print(sys.executable); print(torch.__version__)"
 ```
 
 预期：
 
 ```text
-sys.executable 指向 mattergen/.venv/bin/python
+sys.executable 指向 backend/.venv/bin/python
 torch.__version__ == 2.4.1
 ```
 
@@ -428,7 +426,7 @@ torch.__version__ == 2.4.1
 `backend/requirements.txt` 不再作为安装来源。可以删除，或者将其改成说明文件，明确指出：
 
 - 使用 `pyproject.toml` + `uv.lock`
-- Python 环境使用 `mattergen/.venv`
+- Python 环境使用 `backend/.venv`
 - 不允许根据 requirements.txt 重建独立环境
 
 ## 9. 启动与运行方式
@@ -437,7 +435,7 @@ torch.__version__ == 2.4.1
 
 ```bash
 cd /Users/genhz/Documents/code/material-sandbox/backend
-../mattergen/.venv/bin/python -m uvicorn main:app \
+.venv/bin/python -m uvicorn main:app \
   --reload \
   --host 0.0.0.0 \
   --port 8000
@@ -453,7 +451,7 @@ uv run uvicorn main:app --reload
 
 ```bash
 cd /Users/genhz/Documents/code/material-sandbox/backend
-../mattergen/.venv/bin/python -m pytest
+.venv/bin/python -m pytest
 ```
 
 ### 9.3 Apple Silicon
@@ -473,7 +471,7 @@ export PYTORCH_ENABLE_MPS_FALLBACK=1
 ```text
 MATTERGEN_ENABLED=true
 MATTERGEN_MODEL_ID=dft_mag_density
-MATTERGEN_MODEL_PATH=../mattergen/checkpoints/dft_mag_density
+MATTERGEN_MODEL_PATH=vendor/mattergen/checkpoints/dft_mag_density
 MATTERGEN_ARTIFACT_ROOT=artifacts/generation
 MATTERGEN_MAX_CONCURRENCY=1
 MATTERGEN_JOB_RETENTION_DAYS=7
@@ -1028,7 +1026,7 @@ MATTERGEN_ENABLED=false
 ```bash
 cd /Users/genhz/Documents/code/material-sandbox/backend
 
-../mattergen/.venv/bin/python -c \
+.venv/bin/python -c \
   "import sys, fastapi, langchain, pymatgen, numpy, torch, mattergen; print(sys.executable, torch.__version__)"
 ```
 
@@ -1066,7 +1064,7 @@ cd /Users/genhz/Documents/code/material-sandbox/backend
 
 ```bash
 cd /Users/genhz/Documents/code/material-sandbox/backend
-../mattergen/.venv/bin/python -m pytest
+.venv/bin/python -m pytest
 ```
 
 必须确认原有后端测试通过。
@@ -1129,8 +1127,8 @@ record_trajectories=False
 
 以下条件全部满足才算完成：
 
-- 使用 `mattergen/.venv` 作为唯一 Python 环境
-- 没有创建或使用 `backend/.venv`
+- 使用 `backend/.venv` 作为唯一 Python 环境
+- `backend/.venv` 同时包含后端和 MatterGen 依赖
 - 没有重装 PyTorch
 - 没有删除 MatterGen 依赖
 - MatterGen 可导入
@@ -1216,7 +1214,7 @@ record_trajectories=False
 - 更新 README
 - 更新 .env.example
 - 更新 .gitignore
-- 固化 MatterGen 子仓库信息
+- 确认 MatterGen 内置源码路径和本地权重
 - 确认无权重和 artifacts 进入 Git
 
 ## 21. Git 与文件规则
@@ -1227,8 +1225,9 @@ record_trajectories=False
 backend/.venv/
 backend/artifacts/
 backend/results/
-mattergen/results/
-mattergen/.venv/
+backend/vendor/mattergen/results/
+backend/vendor/mattergen/mattergen.egg-info/
+backend/vendor/mattergen/checkpoints/**/*.ckpt
 *.ckpt.lfs-pointer
 .DS_Store
 ```
@@ -1237,7 +1236,7 @@ mattergen/.venv/
 
 - 不要忽略 MatterGen 源码
 - 不要忽略 `config.yaml`
-- 模型权重是否跟踪由 MatterGen 子仓库自行管理
+- 大型 checkpoint 权重不提交到父仓库
 - 生成结果必须忽略
 - 不提交 `.env`
 - 不提交真实 API Key
@@ -1265,12 +1264,12 @@ mattergen/.venv/
 - 不支持有机晶体、非晶体和原子序数大于 84 的元素
 - 后续必须接入独立预测器或 DFT
 
-### 22.4 Git 子仓库
+### 22.4 内置源码
 
-- 当前父仓库有 gitlink，但没有 `.gitmodules`
-- 全新克隆可能无法获得 MatterGen
-- 子仓库当前有本地权重和未跟踪文件
-- 禁止清理或重置子仓库
+- MatterGen 已迁移到 `backend/vendor/mattergen/`
+- 独立 Git 历史和 `.gitmodules` 已移除
+- checkpoint 权重保留在本地并加入 `.gitignore`
+- 不要重新创建外部 MatterGen 子仓库
 
 ## 23. 执行 Agent 禁止事项
 
@@ -1278,8 +1277,8 @@ mattergen/.venv/
 
 1. 创建新的虚拟环境。
 2. 重装 PyTorch、PyG、MatterSim。
-3. 删除 `mattergen/.venv`。
-4. 使用 `backend/.venv`。
+3. 删除 `backend/.venv`。
+4. 将 MatterGen 迁移回根目录。
 5. 在 FastAPI 请求内部执行完整扩散推理。
 6. 在服务启动时加载模型。
 7. 把 MatterGen 生成结果标成 Materials Project 数据。

@@ -96,10 +96,13 @@ class MatterGenConfig:
     @classmethod
     def load(cls) -> "MatterGenConfig":
         backend_root = Path(__file__).resolve().parent
-        repo_root = backend_root.parent
 
         default_model_path = (
-            repo_root / "mattergen" / "checkpoints" / "dft_mag_density"
+            backend_root
+            / "vendor"
+            / "mattergen"
+            / "checkpoints"
+            / "dft_mag_density"
         )
         default_artifact_root = backend_root / "artifacts" / "generation"
 

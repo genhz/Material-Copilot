@@ -68,22 +68,19 @@ LLM_MODEL=deepseek-ai/DeepSeek-V3
 ### 3. 后端启动
 
 ```bash
-git submodule update --init mattergen
-
 cd backend
 cp .env.example .env
 # 编辑 .env 填入 API keys
 
-# 首次安装后端依赖时，将依赖增量安装到 MatterGen 环境
-source ../mattergen/.venv/bin/activate
-uv sync --active --inexact
+# 安装或同步后端与 MatterGen 的统一依赖
+uv sync
 
 # 启动后端
-../mattergen/.venv/bin/python -m uvicorn main:app \
+.venv/bin/python -m uvicorn main:app \
   --reload --host 0.0.0.0 --port 8000
 ```
 
-MatterGen 使用独立 Python 3.10 环境。不要运行 `uv sync --reinstall`，避免重新安装 PyTorch、PyG 和 MatterSim。
+`backend/.venv` 是后端与 MatterGen 共用的 Python 3.10 环境。不要运行 `uv sync --reinstall`，避免重新安装 PyTorch、PyG 和 MatterSim。
 
 ### 4. 前端启动
 
@@ -144,9 +141,11 @@ material-sandbox/
 │   │   └── App.vue
 │   └── package.json
 │
-├── backend/               # FastAPI + LangChain 后端
+├── backend/               # FastAPI + LangChain + MatterGen 后端
+│   ├── .venv/             # Python 3.10 统一环境
 │   ├── main.py            # API 入口
 │   ├── agent.py           # LangChain Agent
+│   ├── vendor/mattergen/  # 内置 MatterGen 源码与本地权重
 │   ├── skills/            # LangChain Tools
 │   │   ├── chat.py
 │   │   ├── material_search.py
@@ -156,7 +155,6 @@ material-sandbox/
 │   ├── artifacts/         # 运行时任务和候选结构
 │   └── pyproject.toml
 │
-├── mattergen/             # MatterGen 推理运行时
 └── doc/                   # 项目文档
     ├── frontend.png
     ├── backend.md         # 后端详细文档
@@ -202,7 +200,7 @@ MatterGen 的条件生成不代表目标磁密度已经得到验证，后续仍�
 **后端调试:**
 ```bash
 cd backend
-../mattergen/.venv/bin/python -m uvicorn main:app \
+.venv/bin/python -m uvicorn main:app \
   --reload --log-level debug
 ```
 
