@@ -10,6 +10,7 @@ from pymatgen.core import Structure
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 
 from generation.exceptions import GenerationError
+from generation.model_registry import MatterGenModelSpec
 from generation.schemas import (
     CandidateCollection,
     GeneratedCandidate,
@@ -47,6 +48,7 @@ def _candidate_from_structure(
     job_id: str,
     index: int,
     request: GenerationRequest,
+    model_spec: MatterGenModelSpec,
 ) -> GeneratedCandidate:
     validation = _structure_validation(structure)
     if not validation["finite"]:
@@ -61,6 +63,8 @@ def _candidate_from_structure(
     return GeneratedCandidate(
         candidate_id=candidate_id,
         material_id=candidate_id,
+        model_id=model_spec.model_id,
+        model_label=model_spec.display_name,
         formula=structure.composition.reduced_formula,
         pretty_formula=structure.composition.reduced_formula,
         cif=structure.to(fmt="cif"),
@@ -68,7 +72,7 @@ def _candidate_from_structure(
         formula_unit=len(structure),
         elements=[element.symbol for element in structure.composition.elements],
         generation_conditions={
-            "dft_mag_density": request.target_magnetic_density,
+            **request.conditions,
             "guidance_scale": request.guidance_scale,
             "seed": request.seed,
         },
@@ -84,6 +88,7 @@ def extract_candidates(
     *,
     job_id: str,
     request: GenerationRequest,
+    model_spec: MatterGenModelSpec,
     candidates_dir: Path,
 ) -> CandidateCollection:
     """Read a MatterGen CIF ZIP and return validated candidates."""
@@ -116,6 +121,7 @@ def extract_candidates(
                         job_id=job_id,
                         index=index,
                         request=request,
+                        model_spec=model_spec,
                     )
                     candidates.append(candidate)
                     (candidates_dir / f"{index:03d}.cif").write_text(
@@ -142,4 +148,3 @@ def extract_candidates(
             "errors": errors[:20],
         },
     )
-

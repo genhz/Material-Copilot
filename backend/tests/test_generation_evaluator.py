@@ -4,6 +4,7 @@ from zipfile import ZipFile
 from pymatgen.core import Lattice, Structure
 
 from generation.evaluator import extract_candidates
+from generation.model_registry import get_model_spec
 from generation.schemas import GenerationRequest
 
 
@@ -21,6 +22,7 @@ def test_extract_candidates_reads_valid_cif(tmp_path: Path) -> None:
         archive_path,
         job_id="00000000-0000-0000-0000-000000000001",
         request=GenerationRequest(target_magnetic_density=0.15),
+        model_spec=get_model_spec("dft_mag_density"),
         candidates_dir=tmp_path / "candidates",
     )
 
@@ -41,10 +43,10 @@ def test_extract_candidates_records_invalid_cif(tmp_path: Path) -> None:
         archive_path,
         job_id="00000000-0000-0000-0000-000000000002",
         request=GenerationRequest(target_magnetic_density=0.15),
+        model_spec=get_model_spec("dft_mag_density"),
         candidates_dir=tmp_path / "candidates",
     )
 
     assert collection.total_count == 1
     assert collection.invalid_count == 1
     assert collection.candidates == []
-

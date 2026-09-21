@@ -12,6 +12,7 @@ from typing import Optional
 
 from config import MatterGenConfig, get_mattergen_config
 from generation.adapter import MatterGenAdapter
+from generation.campaign_store import CampaignStore
 from generation.events import RealtimeHub
 from generation.exceptions import (
     GenerationDisabledError,
@@ -19,12 +20,18 @@ from generation.exceptions import (
     InvalidJobStateError,
 )
 from generation.schemas import (
+    CampaignCandidateCollection,
+    CampaignCandidateGroup,
+    CampaignJob,
     CandidateCollection,
     GenerationJob,
     GenerationRequest,
     ModelInfo,
+    CampaignRequest,
+    CampaignRunState,
 )
 from generation.store import GenerationStore, utc_now
+from generation.model_registry import get_model_spec, list_model_specs
 
 
 logger = logging.getLogger(__name__)
@@ -38,10 +45,15 @@ class GenerationManager:
         self.store = GenerationStore(config.artifact_root)
         self.adapter = MatterGenAdapter(config)
         self.hub = RealtimeHub()
+        self.campaign_store = CampaignStore(
+            config.artifact_root.parent / "campaigns"
+        )
         self._semaphore: Optional[asyncio.Semaphore] = None
         self._tasks: set[asyncio.Task] = set()
         self._processes: dict[str, asyncio.subprocess.Process] = {}
         self._cancel_requested: set[str] = set()
+        self._campaign_cancel_requested: set[str] = set()
+        self._campaign_tasks: set[asyncio.Task] = set()
         self._started = False
 
     async def startup(self) -> None:
@@ -49,6 +61,7 @@ class GenerationManager:
             return
         self._semaphore = asyncio.Semaphore(self.config.max_concurrency)
         self.store.mark_stale_running_jobs_failed()
+        self.campaign_store.mark_stale_running_failed()
         self._started = True
 
     async def shutdown(self) -> None:
@@ -58,7 +71,12 @@ class GenerationManager:
                 await self._terminate_process(process)
         if self._tasks:
             await asyncio.gather(*self._tasks, return_exceptions=True)
+        if self._campaign_tasks:
+            await asyncio.gather(
+                *self._campaign_tasks, return_exceptions=True
+            )
         self._tasks.clear()
+        self._campaign_tasks.clear()
         self._processes.clear()
         self._started = False
         self._semaphore = None
@@ -73,8 +91,22 @@ class GenerationManager:
             raise GenerationDisabledError()
 
         self._ensure_started()
-        self.adapter.preflight()
-        job = self.store.create_job(request, model_id=self.config.model_id)
+        try:
+            normalized_request = request.normalized()
+        except ValueError as exc:
+            raise GenerationError(
+                "INVALID_CONDITIONS",
+                str(exc),
+                status_code=422,
+            ) from exc
+
+        model_spec = get_model_spec(normalized_request.model_id or "")
+        self.adapter.preflight(model_spec)
+        job = self.store.create_job(
+            normalized_request,
+            model_id=model_spec.model_id,
+            model_label=model_spec.display_name,
+        )
         task = asyncio.create_task(self._run_job(job.job_id))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
@@ -82,6 +114,112 @@ class GenerationManager:
 
     async def get_job(self, job_id: str) -> GenerationJob:
         return self.store.get_job(job_id)
+
+    async def submit_campaign(
+        self, request: CampaignRequest
+    ) -> CampaignJob:
+        if not self.config.enabled:
+            raise GenerationDisabledError()
+        self._ensure_started()
+
+        runs: list[CampaignRunState] = []
+        for run_request in request.runs:
+            generation_request = GenerationRequest(
+                model_id=run_request.model_id,
+                conditions=run_request.conditions,
+                num_candidates=run_request.num_candidates,
+                guidance_scale=run_request.guidance_scale,
+                seed=run_request.seed,
+            )
+            try:
+                generation_request = generation_request.normalized()
+            except ValueError as exc:
+                raise GenerationError(
+                    "INVALID_CONDITIONS",
+                    str(exc),
+                    status_code=422,
+                ) from exc
+
+            model_spec = get_model_spec(generation_request.model_id or "")
+            self.adapter.preflight(model_spec)
+            runs.append(
+                CampaignRunState(
+                    run_id=self.campaign_store.new_id(),
+                    model_id=model_spec.model_id,
+                    model_label=model_spec.display_name,
+                    conditions=generation_request.conditions,
+                    request=generation_request,
+                )
+            )
+
+        campaign = CampaignJob(
+            campaign_id=self.campaign_store.new_id(),
+            name=request.name,
+            runs=runs,
+            created_at=utc_now(),
+        )
+        self.campaign_store.create(campaign)
+        task = asyncio.create_task(self._run_campaign(campaign.campaign_id))
+        self._campaign_tasks.add(task)
+        task.add_done_callback(self._campaign_tasks.discard)
+        return campaign
+
+    async def get_campaign(self, campaign_id: str) -> CampaignJob:
+        return self.campaign_store.get(campaign_id)
+
+    async def get_campaign_candidates(
+        self, campaign_id: str
+    ) -> CampaignCandidateCollection:
+        campaign = self.campaign_store.get(campaign_id)
+        groups: list[CampaignCandidateGroup] = []
+        combined = []
+
+        for run in campaign.runs:
+            candidates = []
+            if run.job_id:
+                try:
+                    candidates = self.store.get_candidates(run.job_id)
+                except Exception:
+                    candidates = []
+            groups.append(
+                CampaignCandidateGroup(
+                    model_id=run.model_id,
+                    model_label=run.model_label,
+                    conditions=run.conditions,
+                    candidates=candidates,
+                )
+            )
+            combined.extend(candidates)
+
+        return CampaignCandidateCollection(
+            campaign_id=campaign_id,
+            groups=groups,
+            candidates=combined,
+            total_count=len(combined),
+        )
+
+    async def cancel_campaign(self, campaign_id: str) -> CampaignJob:
+        campaign = self.campaign_store.get(campaign_id)
+        if campaign.status in {"completed", "failed", "cancelled", "partial"}:
+            raise InvalidJobStateError(
+                f"Campaign 处于终态，不能取消：{campaign.status}"
+            )
+
+        self._campaign_cancel_requested.add(campaign_id)
+        for run in campaign.runs:
+            if run.job_id:
+                try:
+                    await self.cancel(run.job_id)
+                except GenerationError:
+                    pass
+
+        campaign = self.campaign_store.update(
+            campaign_id,
+            status="cancelled",
+            completed_at=utc_now(),
+        )
+        await self._publish_campaign(campaign_id)
+        return campaign
 
     async def get_candidates(self, job_id: str) -> CandidateCollection:
         job = self.store.get_job(job_id)
@@ -124,21 +262,136 @@ class GenerationManager:
         self.hub.remove_subscriber(channel, resource_id, queue)
 
     async def available_models(self) -> list[ModelInfo]:
-        available = False
-        if self.config.enabled:
-            try:
-                self.adapter.preflight()
-                available = True
-            except GenerationError:
-                available = False
+        models: list[ModelInfo] = []
+        for spec in list_model_specs():
+            available = False
+            missing_reason = None
+            if self.config.enabled:
+                try:
+                    self.adapter.preflight(spec)
+                    available = True
+                except GenerationError as exc:
+                    missing_reason = exc.message
 
-        return [
-            ModelInfo(
-                model_id=self.config.model_id,
-                available=available,
-                conditions=["dft_mag_density"],
+            models.append(
+                ModelInfo(
+                    model_id=spec.model_id,
+                    display_name=spec.display_name,
+                    description=spec.description,
+                    category=spec.category,
+                    available=available,
+                    conditions={
+                        name: condition.as_dict()
+                        for name, condition in spec.conditions.items()
+                    },
+                    missing_reason=missing_reason,
+                    download_url=(
+                        spec.download_url if not available else None
+                    ),
+                )
             )
-        ]
+        return models
+
+    async def _run_campaign(self, campaign_id: str) -> None:
+        campaign = self.campaign_store.get(campaign_id)
+        campaign = self.campaign_store.update(
+            campaign_id,
+            status="running",
+        )
+        await self._publish_campaign(campaign_id)
+
+        total_runs = len(campaign.runs)
+        completed_runs = 0
+        failed_runs = 0
+
+        for index, run in enumerate(campaign.runs):
+            if campaign_id in self._campaign_cancel_requested:
+                self._campaign_cancel_requested.discard(campaign_id)
+                return
+
+            job = await self.submit(run.request)
+            campaign = self.campaign_store.get(campaign_id)
+            runs = list(campaign.runs)
+            runs[index] = runs[index].model_copy(
+                update={"job_id": job.job_id, "status": "queued"}
+            )
+            campaign = self.campaign_store.update(
+                campaign_id,
+                runs=runs,
+            )
+            await self._publish_campaign(campaign_id)
+
+            while True:
+                if campaign_id in self._campaign_cancel_requested:
+                    try:
+                        await self.cancel(job.job_id)
+                    except GenerationError:
+                        pass
+                    self._campaign_cancel_requested.discard(campaign_id)
+                    return
+
+                current = self.store.get_job(job.job_id)
+                campaign = self.campaign_store.get(campaign_id)
+                runs = list(campaign.runs)
+                runs[index] = runs[index].model_copy(
+                    update={
+                        "status": current.status,
+                        "progress": current.progress,
+                        "error_message": current.error_message,
+                    }
+                )
+                campaign_progress = (
+                    index + current.progress
+                ) / total_runs
+                campaign = self.campaign_store.update(
+                    campaign_id,
+                    runs=runs,
+                    progress=campaign_progress,
+                )
+                await self._publish_campaign(campaign_id)
+
+                if current.status in {
+                    "completed",
+                    "failed",
+                    "cancelled",
+                }:
+                    if current.status == "completed":
+                        completed_runs += 1
+                    else:
+                        failed_runs += 1
+                    break
+                await asyncio.sleep(0.5)
+
+        if failed_runs == 0:
+            status = "completed"
+        elif completed_runs > 0:
+            status = "partial"
+        else:
+            status = "failed"
+
+        self.campaign_store.update(
+            campaign_id,
+            status=status,
+            progress=1.0,
+            completed_at=utc_now(),
+        )
+        await self._publish_campaign(campaign_id)
+
+    async def _publish_campaign(self, campaign_id: str) -> None:
+        try:
+            campaign = self.campaign_store.get(campaign_id)
+        except Exception:
+            return
+        await self.hub.publish(
+            "generation.campaign",
+            campaign_id,
+            {
+                "type": "update",
+                "channel": "generation.campaign",
+                "resource_id": campaign_id,
+                "campaign": campaign.model_dump(mode="json"),
+            },
+        )
 
     async def _run_job(self, job_id: str) -> None:
         semaphore = self._ensure_started()

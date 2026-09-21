@@ -42,7 +42,14 @@ async def _forward_events(
             payload = await queue.get()
             await outbound.put(payload)
             job = payload.get("job") or {}
-            if job.get("status") in {"completed", "failed", "cancelled"}:
+            campaign = payload.get("campaign") or {}
+            resource = job or campaign
+            if resource.get("status") in {
+                "completed",
+                "partial",
+                "failed",
+                "cancelled",
+            }:
                 return
     finally:
         manager.unsubscribe(channel, resource_id, queue)
@@ -117,19 +124,27 @@ async def realtime_websocket(websocket: WebSocket) -> None:
                 )
                 continue
 
-            if channel != "generation.job" or not resource_id:
+            if channel not in {
+                "generation.job",
+                "generation.campaign",
+            } or not resource_id:
                 await outbound.put(
                     {
                         "type": "error",
                         "code": "INVALID_SUBSCRIPTION",
-                        "message": "当前仅支持 generation.job 频道。",
+                        "message": "不支持的实时订阅频道。",
                         "request_id": request_id,
                     }
                 )
                 continue
 
             try:
-                job = await manager.get_job(str(resource_id))
+                if channel == "generation.job":
+                    resource = await manager.get_job(str(resource_id))
+                    resource_key = "job"
+                else:
+                    resource = await manager.get_campaign(str(resource_id))
+                    resource_key = "campaign"
             except GenerationError as exc:
                 await outbound.put(
                     {
@@ -162,7 +177,7 @@ async def realtime_websocket(websocket: WebSocket) -> None:
                     "type": "snapshot",
                     "channel": channel,
                     "resource_id": resource_id,
-                    "job": job.model_dump(mode="json"),
+                    resource_key: resource.model_dump(mode="json"),
                     "server_time": datetime.now(timezone.utc).isoformat(),
                 }
             )

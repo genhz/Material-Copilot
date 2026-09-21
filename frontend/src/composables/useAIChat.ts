@@ -21,10 +21,16 @@ export function useAIChat() {
     materialData: MaterialData | null
     action: ChatAction
     jobId: string | null
+    campaignId: string | null
   }> {
     const trimmed = text.trim()
     if (!trimmed || isChatting.value) {
-      return { materialData: null, action: 'chat', jobId: null }
+      return {
+        materialData: null,
+        action: 'chat',
+        jobId: null,
+        campaignId: null,
+      }
     }
 
     // 添加用户消息
@@ -51,11 +57,13 @@ export function useAIChat() {
       const materialData = response.material_data || null
       const action = response.action || 'chat'
       const jobId = response.job_id || null
+      const campaignId = response.campaign_id || null
 
       console.log('[useAIChat] 收到响应:', {
         action,
         formula: materialData?.formula,
         jobId,
+        campaignId,
       })
 
       // 添加助手回复
@@ -66,14 +74,19 @@ export function useAIChat() {
         materialData,
       })
 
-      return { materialData, action, jobId }
+      return { materialData, action, jobId, campaignId }
     } catch (error: any) {
       messages.value.push({
         id: messageIdCounter++,
         role: 'assistant',
         content: `请求失败：${error.message || '未知错误'}`,
       })
-      return { materialData: null, action: 'chat', jobId: null }
+      return {
+        materialData: null,
+        action: 'chat',
+        jobId: null,
+        campaignId: null,
+      }
     } finally {
       isChatting.value = false
     }

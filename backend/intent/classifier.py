@@ -28,6 +28,7 @@ CLASSIFIER_SYSTEM_PROMPT = """你是材料科学应用的意图分类器。
    - 给我一些还没被材料库收录的候选结构
    - 想找高磁化强度材料，给我几个方案
    - 不用查已有材料，帮我探索新材料
+   - 使用多个模型全面探索
 
 2. material_lookup:
    用户查询已知的化学式、已有晶体结构或 Materials Project 数据。
@@ -51,8 +52,14 @@ CLASSIFIER_SYSTEM_PROMPT = """你是材料科学应用的意图分类器。
 - 只要明确表示要探索或设计新的材料候选，就使用 material_generation。
 - 目标磁密度未给时默认 0.15，候选数量默认 2，引导系数默认 2.0。
 - “高磁密度”可映射为 0.2。
-- 低稀土成本、HHI 或供应风险目前不能由 dft_mag_density 模型严格保证；
-  如果用户只要求这些复杂约束，设置 needs_clarification=true。
+- 磁密度和 HHI 联合目标使用 dft_mag_density_hhi_score。
+- 指定元素体系使用 chemical_system。
+- 元素体系和稳定性联合目标使用 chemical_system_energy_above_hull。
+- 带隙使用 dft_band_gap。
+- 体积模量使用 ml_bulk_modulus。
+- 空间群使用 space_group。
+- 没有明确目标时可以使用 mattergen_base。
+- 用户明确要求同时运行多个模型时设置 campaign_requested=true。
 """
 
 
@@ -82,6 +89,9 @@ LOOKUP_CUES = (
 )
 SUBSTITUTION_CUES = ("替换", "替代", "掺杂", "换成", "改为")
 FORMULA_PATTERN = re.compile(r"\b[A-Z][a-z]?\d*(?:[A-Z][a-z]?\d*)+\b")
+CHEMICAL_SYSTEM_PATTERN = re.compile(
+    r"\b[A-Z][a-z]?(?:-[A-Z][a-z]?)+\b"
+)
 
 
 def _heuristic_decision(message: str) -> Optional[IntentDecision]:
@@ -115,24 +125,84 @@ def _heuristic_decision(message: str) -> Optional[IntentDecision]:
         count_match = re.search(r"(\d+)\s*(?:个|种)", normalized)
         count = int(count_match.group(1)) if count_match else 2
         count = max(1, min(count, 16))
-
-        needs_clarification = (
-            "低稀土" in normalized
-            or "供应风险" in normalized
-            or "hhi" in normalized.lower()
+        chemical_system_match = CHEMICAL_SYSTEM_PATTERN.search(normalized)
+        chemical_system = (
+            chemical_system_match.group(0)
+            if chemical_system_match
+            else None
         )
-        question = None
-        if needs_clarification:
-            question = (
-                "当前模型可以优化磁密度，但不能严格保证低稀土成本或供应风险。"
-                "是否先按高磁密度生成 2 个候选？"
+
+        model_id = "dft_mag_density"
+        conditions: dict[str, float | int | str] = {
+            "dft_mag_density": target_density
+        }
+        campaign_requested = (
+            "多个模型" in normalized
+            or "所有模型" in normalized
+            or "全面探索" in normalized
+            or "多模型" in normalized
+        )
+
+        if "低稀土" in normalized or "供应风险" in normalized or "hhi" in normalized.lower():
+            model_id = "dft_mag_density_hhi_score"
+            conditions = {
+                "dft_mag_density": target_density,
+                "hhi_score": 0.3,
+            }
+        elif chemical_system and (
+            "稳定" in normalized or "凸包" in normalized
+        ):
+            model_id = "chemical_system_energy_above_hull"
+            conditions = {
+                "chemical_system": chemical_system,
+                "energy_above_hull": 0.05,
+            }
+        elif chemical_system:
+            model_id = "chemical_system"
+            conditions = {"chemical_system": chemical_system}
+        elif "带隙" in normalized:
+            band_gap_match = re.search(
+                r"(\d+(?:\.\d+)?)\s*(?:ev|eV)",
+                normalized,
             )
+            model_id = "dft_band_gap"
+            conditions = {
+                "dft_band_gap": (
+                    float(band_gap_match.group(1))
+                    if band_gap_match
+                    else 1.5
+                )
+            }
+        elif "体积模量" in normalized or "体模量" in normalized:
+            modulus_match = re.search(r"(\d+(?:\.\d+)?)\s*gpa", normalized)
+            model_id = "ml_bulk_modulus"
+            conditions = {
+                "ml_bulk_modulus": (
+                    float(modulus_match.group(1))
+                    if modulus_match
+                    else 300.0
+                )
+            }
+        elif "空间群" in normalized:
+            space_group_match = re.search(r"空间群\s*(\d+)", normalized)
+            model_id = "space_group"
+            conditions = {
+                "space_group": (
+                    int(space_group_match.group(1))
+                    if space_group_match
+                    else 194
+                )
+            }
+        elif "通用" in normalized or "随便探索" in normalized:
+            model_id = "mattergen_base"
+            conditions = {}
 
         return IntentDecision(
-            intent="clarification" if needs_clarification else "material_generation",
+            intent="material_generation",
             confidence=0.88,
-            needs_clarification=needs_clarification,
-            clarification_question=question,
+            model_id=model_id,
+            conditions=conditions,
+            campaign_requested=campaign_requested,
             target_magnetic_density=target_density,
             num_candidates=count,
             guidance_scale=2.0,

@@ -47,6 +47,8 @@ def test_store_candidate_round_trip(tmp_path: Path) -> None:
     candidate = GeneratedCandidate(
         candidate_id=f"mg-{job.job_id}-000",
         material_id=f"mg-{job.job_id}-000",
+        model_id="dft_mag_density",
+        model_label="磁密度生成",
         formula="NaCl",
         pretty_formula="NaCl",
         cif="data_NaCl",
@@ -66,4 +68,3 @@ def test_store_candidate_round_trip(tmp_path: Path) -> None:
     loaded = store.get_candidate_collection(job.job_id)
     assert loaded.total_count == 1
     assert loaded.candidates[0].formula == "NaCl"
-

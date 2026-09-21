@@ -93,9 +93,10 @@ class MaterialData(BaseModel):
 
 class ChatResponse(BaseModel):
     reply: str
-    action: str  # "chat" | "render" | "generate"
+    action: str  # "chat" | "render" | "generate" | "campaign"
     material_data: Optional[MaterialData] = None
     job_id: Optional[str] = None
+    campaign_id: Optional[str] = None
     session_id: Optional[str] = None
 
 
@@ -185,6 +186,7 @@ async def chat(request: ChatRequest):
             action=result.action,
             material_data=material_data,
             job_id=result.job_id,
+            campaign_id=result.campaign_id,
             session_id=session_id,
         )
 
@@ -197,6 +199,7 @@ async def chat(request: ChatRequest):
             action="chat",
             material_data=None,
             job_id=None,
+            campaign_id=None,
             session_id=session_id,
         )
 

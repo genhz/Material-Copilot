@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Optional, Type
+from typing import Any, Optional, Type
 
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field
@@ -17,8 +17,16 @@ from generation.schemas import GenerationRequest
 class MaterialGenerationInput(BaseModel):
     """Input arguments accepted by the generation tool."""
 
-    target_magnetic_density: float = Field(
-        ...,
+    model_id: Optional[str] = Field(
+        default=None,
+        description="可选的内部模型 ID，通常由系统自动选择。",
+    )
+    conditions: dict[str, Any] = Field(
+        default_factory=dict,
+        description="模型条件，例如 dft_mag_density、hhi_score、space_group。",
+    )
+    target_magnetic_density: Optional[float] = Field(
+        default=None,
         gt=0,
         le=1,
         description="目标 DFT 磁密度，单位为每立方埃，例如 0.15。",
@@ -46,18 +54,21 @@ class MaterialGenerationTool(BaseTool):
 
     name: str = "material_generation"
     description: str = (
-        "根据目标磁密度创建新材料候选任务。"
+        "创建新材料候选生成任务。"
         "用户要求生成、设计、发现、探索或寻找尚未确定的磁性材料候选时使用。"
         "用户不需要知道 MatterGen 或任何内部模型名称。"
         "该工具只提交后台任务并返回 job_id，不等待扩散采样完成。"
         "不要把该工具用于预测已有材料的磁密度。"
-        "参数包括 target_magnetic_density、num_candidates、guidance_scale 和 seed。"
+        "参数包括 model_id、conditions、target_magnetic_density、"
+        "num_candidates、guidance_scale 和 seed。"
     )
     args_schema: Type[BaseModel] = MaterialGenerationInput
 
     def _run(
         self,
-        target_magnetic_density: float,
+        model_id: Optional[str] = None,
+        conditions: Optional[dict[str, Any]] = None,
+        target_magnetic_density: Optional[float] = None,
         num_candidates: int = 2,
         guidance_scale: float = 2.0,
         seed: Optional[int] = None,
@@ -66,6 +77,8 @@ class MaterialGenerationTool(BaseTool):
             return asyncio.run(
                 self._arun(
                     target_magnetic_density=target_magnetic_density,
+                    model_id=model_id,
+                    conditions=conditions or {},
                     num_candidates=num_candidates,
                     guidance_scale=guidance_scale,
                     seed=seed,
@@ -84,7 +97,9 @@ class MaterialGenerationTool(BaseTool):
 
     async def _arun(
         self,
-        target_magnetic_density: float,
+        model_id: Optional[str] = None,
+        conditions: Optional[dict[str, Any]] = None,
+        target_magnetic_density: Optional[float] = None,
         num_candidates: int = 2,
         guidance_scale: float = 2.0,
         seed: Optional[int] = None,
@@ -92,6 +107,8 @@ class MaterialGenerationTool(BaseTool):
         manager = get_generation_manager()
         await manager.startup()
         request = GenerationRequest(
+            model_id=model_id,
+            conditions=conditions or {},
             target_magnetic_density=target_magnetic_density,
             num_candidates=num_candidates,
             guidance_scale=guidance_scale,

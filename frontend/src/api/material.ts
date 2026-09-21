@@ -3,11 +3,14 @@
  */
 import axios from 'axios'
 import type {
+  CampaignCandidateCollection,
+  CampaignJob,
   CandidateCollection,
   ChatRequest,
   ChatResponse,
   GenerationJob,
   GenerationRequest,
+  MatterGenModelInfo,
   MaterialData,
 } from '../types/material'
 
@@ -98,6 +101,56 @@ export async function getGenerationCandidates(
 export async function cancelGenerationJob(jobId: string): Promise<GenerationJob> {
   const resp = await api.post<GenerationJob>(
     `/api/generation/jobs/${encodeURIComponent(jobId)}/cancel`
+  )
+  return resp.data
+}
+
+export async function getGenerationModels(): Promise<MatterGenModelInfo[]> {
+  const resp = await api.get<MatterGenModelInfo[]>('/api/generation/models')
+  return resp.data
+}
+
+export async function createGenerationCampaign(payload: {
+  name: string
+  runs: Array<{
+    model_id: string
+    conditions: Record<string, unknown>
+    num_candidates: number
+    guidance_scale?: number
+    seed?: number | null
+  }>
+  max_concurrency?: number
+}): Promise<CampaignJob> {
+  const resp = await api.post<CampaignJob>(
+    '/api/generation/campaigns',
+    payload
+  )
+  return resp.data
+}
+
+export async function getGenerationCampaign(
+  campaignId: string
+): Promise<CampaignJob> {
+  const resp = await api.get<CampaignJob>(
+    `/api/generation/campaigns/${encodeURIComponent(campaignId)}`
+  )
+  return resp.data
+}
+
+export async function getCampaignCandidates(
+  campaignId: string
+): Promise<CampaignCandidateCollection> {
+  const resp = await api.get<CampaignCandidateCollection>(
+    `/api/generation/campaigns/${encodeURIComponent(campaignId)}/candidates`
+  )
+  return resp.data
+}
+
+export async function cancelGenerationCampaign(
+  campaignId: string
+): Promise<CampaignJob> {
+  const resp = await api.post<CampaignJob>(
+    `/api/generation/campaigns/${encodeURIComponent(campaignId)}/cancel`
   )
   return resp.data
 }

@@ -35,3 +35,19 @@ def test_substitution_intent_has_priority() -> None:
 
     assert decision is not None
     assert decision.intent == "element_substitution"
+
+
+def test_low_supply_risk_routes_to_joint_magnetic_model() -> None:
+    decision = _heuristic_decision("设计高磁密度且低供应风险的磁性材料")
+
+    assert decision is not None
+    assert decision.model_id == "dft_mag_density_hhi_score"
+    assert decision.conditions["dft_mag_density"] == 0.2
+    assert decision.conditions["hhi_score"] == 0.3
+
+
+def test_multi_model_exploration_sets_campaign_flag() -> None:
+    decision = _heuristic_decision("使用所有模型全面探索新型磁性材料")
+
+    assert decision is not None
+    assert decision.campaign_requested is True

@@ -37,14 +37,37 @@ export interface ChatRequest {
   session_id?: string | null
 }
 
-export type ChatAction = 'chat' | 'render' | 'generate'
+export type ChatAction = 'chat' | 'render' | 'generate' | 'campaign'
 
 export interface ChatResponse {
   reply: string
   action: ChatAction
   material_data?: MaterialData | null
   job_id?: string | null
+  campaign_id?: string | null
   session_id?: string | null
+}
+
+export interface ModelCondition {
+  name: string
+  type: 'float' | 'int' | 'string'
+  required: boolean
+  default: number | string | null
+  description: string
+  minimum?: number | null
+  maximum?: number | null
+  options: string[]
+}
+
+export interface MatterGenModelInfo {
+  model_id: string
+  display_name: string
+  description: string
+  category: string
+  available: boolean
+  conditions: Record<string, ModelCondition>
+  missing_reason?: string | null
+  download_url?: string | null
 }
 
 export type GenerationStatus =
@@ -64,7 +87,10 @@ export type GenerationPhase =
   | 'cancelled'
 
 export interface GenerationRequest {
-  target_magnetic_density: number
+  model_id?: string | null
+  conditions: Record<string, number | string>
+  target_magnetic_density?: number | null
+  hhi_score?: number | null
   num_candidates?: number
   guidance_scale?: number
   seed?: number | null
@@ -78,6 +104,7 @@ export interface GenerationJob {
   message?: string | null
   sequence: number
   model_id: string
+  model_label?: string | null
   request: GenerationRequest
   error_code?: string | null
   error_message?: string | null
@@ -90,6 +117,8 @@ export interface GenerationJob {
 export interface GeneratedCandidate {
   candidate_id: string
   material_id: string
+  model_id: string
+  model_label: string
   formula: string
   pretty_formula: string
   cif: string
@@ -109,4 +138,48 @@ export interface CandidateCollection {
   invalid_count: number
   total_count: number
   validation: Record<string, unknown>
+}
+
+export type CampaignStatus =
+  | 'queued'
+  | 'running'
+  | 'partial'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+
+export interface CampaignRunState {
+  run_id: string
+  model_id: string
+  model_label: string
+  conditions: Record<string, unknown>
+  job_id?: string | null
+  status: GenerationStatus
+  progress: number
+  error_message?: string | null
+}
+
+export interface CampaignJob {
+  campaign_id: string
+  name: string
+  status: CampaignStatus
+  progress: number
+  runs: CampaignRunState[]
+  created_at: string
+  updated_at: string
+  completed_at?: string | null
+}
+
+export interface CampaignCandidateGroup {
+  model_id: string
+  model_label: string
+  conditions: Record<string, unknown>
+  candidates: GeneratedCandidate[]
+}
+
+export interface CampaignCandidateCollection {
+  campaign_id: string
+  groups: CampaignCandidateGroup[]
+  candidates: GeneratedCandidate[]
+  total_count: number
 }

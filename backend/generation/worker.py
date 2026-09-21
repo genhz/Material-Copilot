@@ -12,6 +12,7 @@ from config import get_mattergen_config
 from generation.adapter import MatterGenAdapter
 from generation.evaluator import extract_candidates
 from generation.exceptions import GenerationError
+from generation.model_registry import get_model_spec
 from generation.store import GenerationStore, utc_now
 
 
@@ -76,11 +77,14 @@ def run_job(job_id: str) -> int:
 
     try:
         adapter = MatterGenAdapter(config)
-        adapter.preflight()
+        model_spec = get_model_spec(job.model_id)
+        job_request = job.request.normalized()
+        adapter.preflight(model_spec)
         job_dir = store.job_dir(job_id)
         report_progress = _progress_reporter(store, job_id)
         adapter.generate(
-            request=job.request,
+            request=job_request,
+            model_spec=model_spec,
             output_dir=job_dir,
             progress_callback=report_progress,
         )
@@ -96,7 +100,8 @@ def run_job(job_id: str) -> int:
         collection = extract_candidates(
             store.generated_zip_path(job_id),
             job_id=job_id,
-            request=job.request,
+            request=job_request,
+            model_spec=model_spec,
             candidates_dir=store.candidates_dir(job_id),
         )
         if not collection.candidates:

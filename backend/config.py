@@ -86,8 +86,6 @@ class MatterGenConfig:
     """MatterGen runtime configuration."""
 
     enabled: bool
-    model_id: str
-    model_path: Path
     artifact_root: Path
     max_concurrency: int
     job_retention_days: int
@@ -97,22 +95,11 @@ class MatterGenConfig:
     def load(cls) -> "MatterGenConfig":
         backend_root = Path(__file__).resolve().parent
 
-        default_model_path = (
-            backend_root
-            / "vendor"
-            / "mattergen"
-            / "checkpoints"
-            / "dft_mag_density"
-        )
         default_artifact_root = backend_root / "artifacts" / "generation"
 
         return cls(
             enabled=os.getenv("MATTERGEN_ENABLED", "true").lower()
             in {"1", "true", "yes", "on"},
-            model_id=os.getenv("MATTERGEN_MODEL_ID", "dft_mag_density"),
-            model_path=Path(
-                os.getenv("MATTERGEN_MODEL_PATH", str(default_model_path))
-            ).expanduser().resolve(),
             artifact_root=Path(
                 os.getenv("MATTERGEN_ARTIFACT_ROOT", str(default_artifact_root))
             ).expanduser().resolve(),
