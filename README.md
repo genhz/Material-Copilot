@@ -1,26 +1,36 @@
-# Material-Copilot
+# 🧬 Material-Copilot
 
-基于 LangChain、FastAPI、MatterGen 和 Materials Project 的材料检索与生成平台。
+> **基于 LangChain、FastAPI、MatterGen 和 Materials Project 的材料检索与生成平台。**
 
 支持自然语言查询材料、元素替换、MatterGen 候选生成、多模型 Campaign、WebSocket 实时进度和 CIF 3D 可视化。
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Vue 3](https://img.shields.io/badge/Vue.js-3.0-4FC08D?logo=vue.js)](https://vuejs.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688?logo=fastapi)](https://fastapi.tiangolo.com)
+[![LangChain](https://img.shields.io/badge/LangChain-Agent-1c3c3c?logo=langchain)](https://python.langchain.com/)
+[![MatterGen](https://img.shields.io/badge/MatterGen-Microsoft-blue)](https://github.com/microsoft/mattergen)
+
+## 📸 界面预览
+
 ![Material-Copilot](doc/frontend.png)
 
-## 功能
+## ✨ 功能
 
-- Materials Project 查询和物性展示
-- 自然语言意图识别与 LangChain Agent
-- 元素替换和掺杂
-- 九种 MatterGen 模型统一路由
-- 单模型生成和多模型顺序 Campaign
-- WebSocket 实时进度与常驻候选列表
-- 3Dmol.js 晶体结构可视化
+- 🔍 **Materials Project 查询**：材料检索和物性展示
+- 💬 **自然语言交互**：语义意图识别与 LangChain Agent
+- 🧩 **元素替换**：元素替代和掺杂
+- 🧪 **MatterGen 模型**：九种预训练模型统一路由
+- 🚀 **多模型探索**：单模型生成和多模型顺序 Campaign
+- 📡 **实时进度**：WebSocket 推送与常驻候选列表
+- 🔮 **3D 可视化**：CIF 晶体结构渲染
 
-技术栈：Vue 3、TypeScript、Vite、Element Plus、FastAPI、LangChain、PyTorch、MatterGen、MatterSim、3Dmol.js。
+## 🛠️ 技术栈
 
-## 快速开始
+Vue 3、TypeScript、Vite、Element Plus、FastAPI、LangChain、PyTorch、MatterGen、MatterSim、3Dmol.js。
 
-### 1. 配置
+## 🚀 快速开始
+
+### 1. 配置环境变量
 
 ```bash
 cd backend
@@ -89,7 +99,7 @@ npm run dev
 
 访问 `http://localhost:5173`。
 
-## MatterGen 模型
+## 🧪 MatterGen 模型
 
 | 模型 ID | 条件 | 用途 |
 |---|---|---|
@@ -105,7 +115,7 @@ npm run dev
 
 权重缺失时接口返回 `MODEL_WEIGHTS_NOT_FOUND`，并给出预期路径和下载地址，不会静默切换模型。
 
-## 使用示例
+## 💬 使用示例
 
 ```text
 查看 Nd2Fe14B 的晶体结构
@@ -118,7 +128,7 @@ npm run dev
 使用所有模型全面探索新型磁性材料
 ```
 
-## 主要接口
+## 🔌 主要接口
 
 ```text
 POST /api/chat
@@ -138,7 +148,7 @@ GET  /api/generation/models
 WS   /api/ws
 ```
 
-## 项目结构
+## 📁 项目结构
 
 ```text
 material-sandbox/
@@ -154,7 +164,7 @@ material-sandbox/
 └── doc/
 ```
 
-## 测试
+## ✅ 测试
 
 ```bash
 cd backend
@@ -166,6 +176,6 @@ npm run build
 
 更多实现细节见 [后端文档](doc/backend.md)、[元素替换文档](doc/element_substitution.md) 和 [MatterGen 集成方案](doc/mattergen-integration-refactor-plan.md)。
 
-## 许可证
+## 📄 许可证
 
 MIT License
