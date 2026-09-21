@@ -1,88 +1,85 @@
-# 🧬 Material-Copilot
+# Material-Copilot
 
-> **A conversational AI assistant for agile materials retrieval and interactive 3D visualization.**
-> 
-> 基于 LangChain Agent 与 Materials Project API 的材料科学智能助手。
+基于 LangChain、FastAPI、MatterGen 和 Materials Project 的材料检索与生成平台。
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Vue 3](https://img.shields.io/badge/Vue.js-3.0-4FC08D?logo=vue.js)](https://vuejs.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688?logo=fastapi)](https://fastapi.tiangolo.com)
-[![LangChain](https://img.shields.io/badge/LangChain-Agent-1c3c3c?logo=langchain)](https://python.langchain.com/)
+支持自然语言查询材料、元素替换、MatterGen 候选生成、多模型 Campaign、WebSocket 实时进度和 CIF 3D 可视化。
 
-Material-Copilot 是一个专为材料科学（特别是磁性材料、稀土合金等复杂结构研究）打造的轻量级科研辅助工具。它通过 **LangChain Agent** 实现智能意图识别，将繁琐的材料数据库检索过程简化为自然语言对话，并在前端实现晶体结构的无缝、沉浸式 3D 渲染。
+![Material-Copilot](doc/frontend.png)
 
-## ✨ 核心特性
+## 功能
 
-- 💬 **对话即检索** — 通过自然语言获取材料数据，无需复杂表单
-- 🤖 **LangChain Agent 驱动** — ReAct Agent 自动判断意图，智能调用工具
-- 🔮 **沉浸式 3D 沙盘** — 全屏 3D 画布实时渲染 CIF 晶体结构
-- 🧪 **MatterGen 候选生成** — 根据目标磁密度异步生成新材料候选
-- 📊 **物性数据卡片** — 展示形成能、带隙、磁性等关键参数
-- 🌓 **深浅色主题** — 适配夜间科研工作
-- 🚀 **前后端解耦** — Vue 3 + FastAPI 轻量架构
+- Materials Project 查询和物性展示
+- 自然语言意图识别与 LangChain Agent
+- 元素替换和掺杂
+- 九种 MatterGen 模型统一路由
+- 单模型生成和多模型顺序 Campaign
+- WebSocket 实时进度与常驻候选列表
+- 3Dmol.js 晶体结构可视化
 
-## 📸 界面预览
+技术栈：Vue 3、TypeScript、Vite、Element Plus、FastAPI、LangChain、PyTorch、MatterGen、MatterSim、3Dmol.js。
 
-<p align="center">
-  <img src="doc/frontend.png" width="95%">
-</p>
+## 快速开始
 
-## 🛠️ 技术栈
-
-| 前端 | 后端 |
-|------|------|
-| Vue 3 + Vite | FastAPI |
-| TailwindCSS | LangChain + LangGraph |
-| Element Plus | mp-api (Materials Project) |
-| 3Dmol.js | MatterGen + PyTorch |
-| ECharts | 任意 OpenAI 兼容 LLM |
-
-## 🚀 快速开始
-
-### 1. 获取 API 密钥
-
-- **Materials Project API Key:** [注册获取](https://nextgen.materialsproject.org/)
-- **LLM API Key:** 支持 DeepSeek、OpenAI 等任意 OpenAI 兼容接口
-
-### 2. 配置 LLM
-
-编辑 `backend/.env`，修改以下三个值来切换 LLM 提供商，例如：
-
-```bash
-# DeepSeek
-LLM_API_KEY=sk-xxxxxxxx
-LLM_BASE_URL=https://api.deepseek.com
-LLM_MODEL=deepseek-chat
-
-# OpenAI
-LLM_API_KEY=sk-xxxxxxxx
-LLM_BASE_URL=https://api.openai.com/v1
-LLM_MODEL=gpt-4o
-
-# SiliconFlow
-LLM_API_KEY=xxxxxxxx
-LLM_BASE_URL=https://api.siliconflow.cn/v1
-LLM_MODEL=deepseek-ai/DeepSeek-V3
-```
-
-### 3. 后端启动
+### 1. 配置
 
 ```bash
 cd backend
 cp .env.example .env
-# 编辑 .env 填入 API keys
-
-# 安装或同步后端与 MatterGen 的统一依赖
-uv sync
-
-# 启动后端
-.venv/bin/python -m uvicorn main:app \
-  --reload --host 0.0.0.0 --port 8000
 ```
 
-`backend/.venv` 是后端与 MatterGen 共用的 Python 3.10 环境。不要运行 `uv sync --reinstall`，避免重新安装 PyTorch、PyG 和 MatterSim。
+至少填写：
 
-### 4. 前端启动
+```bash
+LLM_API_KEY=...
+LLM_BASE_URL=https://api.deepseek.com
+LLM_MODEL=deepseek-chat
+MP_API_KEY=...
+```
+
+### 2. 安装后端
+
+```bash
+cd backend
+uv sync
+```
+
+该命令会创建 `backend/.venv`，并安装后端、MatterGen、PyTorch、PyG、MatterSim 和 LangChain。
+
+不要跨操作系统复制 `.venv`。每台机器需要重新执行 `uv sync`。
+
+### 3. 下载模型权重
+
+权重不会通过 Git 同步，每台机器需要单独下载。最小可用权重：
+
+```bash
+export HF_ENDPOINT=https://hf-mirror.com
+
+hf download microsoft/mattergen \
+  checkpoints/dft_mag_density/checkpoints/last.ckpt \
+  --local-dir backend/vendor/mattergen
+```
+
+其他模型的下载地址可通过 `GET /api/generation/models` 查询。
+
+权重必须放在：
+
+```text
+backend/vendor/mattergen/checkpoints/<model_id>/checkpoints/last.ckpt
+```
+
+### 4. 启动后端
+
+```bash
+cd backend
+.venv/bin/python -m uvicorn main:app \
+  --reload \
+  --host 0.0.0.0 \
+  --port 8000
+```
+
+API 文档：`http://127.0.0.1:8000/docs`
+
+### 5. 启动前端
 
 ```bash
 cd frontend
@@ -90,134 +87,85 @@ npm install
 npm run dev
 ```
 
-访问 `http://localhost:5173` 即可使用。
+访问 `http://localhost:5173`。
 
-## 🏗️ 架构设计
+## MatterGen 模型
 
-### LangChain Agent 架构
+| 模型 ID | 条件 | 用途 |
+|---|---|---|
+| `mattergen_base` | 无 | 通用材料探索 |
+| `mp_20_base` | 无 | MP-20 通用生成 |
+| `dft_mag_density` | `dft_mag_density` | 高磁密度候选 |
+| `dft_mag_density_hhi_score` | `dft_mag_density`、`hhi_score` | 磁性能与供应风险 |
+| `chemical_system` | `chemical_system` | 指定元素体系 |
+| `chemical_system_energy_above_hull` | `chemical_system`、`energy_above_hull` | 元素体系与稳定性 |
+| `dft_band_gap` | `dft_band_gap` | 指定带隙 |
+| `ml_bulk_modulus` | `ml_bulk_modulus` | 体积模量 |
+| `space_group` | `space_group` | 指定空间群 |
 
+权重缺失时接口返回 `MODEL_WEIGHTS_NOT_FOUND`，并给出预期路径和下载地址，不会静默切换模型。
+
+## 使用示例
+
+```text
+查看 Nd2Fe14B 的晶体结构
+把 Nd2Fe14B 中的 Fe 替换成 Co
+帮我设计两个高磁密度磁性材料候选
+生成高磁密度且低供应风险的磁性材料
+设计 Nd-Fe-B 体系中的稳定材料
+生成带隙约 1.5 eV 的材料
+生成空间群为 194 的晶体结构
+使用所有模型全面探索新型磁性材料
 ```
-用户输入 ──▶ LangChain Agent ──▶ 自动选择工具
-                                      │
-              ┌───────────────────────┼───────────────────────┐
-              ▼                       ▼                       ▼
-        ChatTool            MaterialSearch         ElementSubstitution
-     材料科学问答            晶体结构查询              元素替换/掺杂
-                                      │
-                                      ▼
-                            MaterialGeneration
-                            MatterGen 候选生成
+
+## 主要接口
+
+```text
+POST /api/chat
+GET  /api/material/search
+
+POST /api/generation/jobs
+GET  /api/generation/jobs/{job_id}
+GET  /api/generation/jobs/{job_id}/candidates
+POST /api/generation/jobs/{job_id}/cancel
+
+POST /api/generation/campaigns
+GET  /api/generation/campaigns/{campaign_id}
+GET  /api/generation/campaigns/{campaign_id}/candidates
+POST /api/generation/campaigns/{campaign_id}/cancel
+
+GET  /api/generation/models
+WS   /api/ws
 ```
 
-**核心组件:**
+## 项目结构
 
-| 组件 | 文件 | 职责 |
-|------|------|------|
-| **Agent** | `backend/agent.py` | LangChain ReAct Agent，智能意图识别 |
-| **ChatTool** | `backend/skills/chat.py` | 材料科学领域对话 |
-| **MaterialSearchTool** | `backend/skills/material_search.py` | 查询 Materials Project 数据库 |
-| **ElementSubstitutionTool** | `backend/skills/element_substitution.py` | 元素替换/掺杂 |
-| **MaterialGenerationTool** | `backend/skills/material_generation.py` | 提交 MatterGen 磁性材料生成任务 |
-
-**意图识别示例:**
-
-| 用户输入 | Agent 行为 | 响应 |
-|----------|-----------|------|
-| "Nd₂Fe₁₄B" | `material_search` | 打开 3D 晶体视图 |
-| "查看 Fe3O4 的晶体结构" | `material_search` | 打开 3D 晶体视图 |
-| "什么是带隙？" | `chat` | 纯文本解释 |
-| "哪些材料适合做永磁体？" | `chat` | 材料推荐 |
-| "把 Nd2Fe14B 中的 Fe 替换成 Co" | `element_substitution` | 显示 Nd2Co14B 结构 |
-| "生成磁密度约 0.15 的候选材料" | `material_generation` | 创建后台生成任务 |
-
-### 项目结构
-
-```
+```text
 material-sandbox/
-├── frontend/              # Vue 3 前端项目
-│   ├── src/
-│   │   ├── components/    # UI 组件
-│   │   ├── composables/   # 组合式函数
-│   │   └── App.vue
-│   └── package.json
-│
-├── backend/               # FastAPI + LangChain + MatterGen 后端
-│   ├── .venv/             # Python 3.10 统一环境
-│   ├── main.py            # API 入口
-│   ├── agent.py           # LangChain Agent
-│   ├── vendor/mattergen/  # 内置 MatterGen 源码与本地权重
-│   ├── skills/            # LangChain Tools
-│   │   ├── chat.py
-│   │   ├── material_search.py
-│   │   ├── element_substitution.py
-│   │   └── material_generation.py
-│   ├── generation/        # 后台生成任务、Worker 和 CIF 后处理
-│   ├── artifacts/         # 运行时任务和候选结构
-│   └── pyproject.toml
-│
-└── doc/                   # 项目文档
-    ├── frontend.png
-    ├── backend.md         # 后端详细文档
-    ├── element_substitution.md  # 元素替换工具文档
-    └── mattergen-integration-refactor-plan.md
+├── backend/
+│   ├── agent.py
+│   ├── intent/              # 语义意图路由
+│   ├── skills/              # LangChain Tools
+│   ├── generation/          # 模型注册、任务、Worker、Campaign
+│   ├── realtime/            # WebSocket 网关
+│   ├── vendor/mattergen/    # MatterGen 源码、配置和权重
+│   └── tests/
+├── frontend/
+└── doc/
 ```
 
-## ❓ 常见问题
+## 测试
 
-### 化学式必须用下标吗？
-
-不需要。`Nd2Fe14B`、`Nd₂Fe₁₄B`、`Nd2Fe14 B` 都能自动识别。
-
-### 元素替换的数据从哪来？
-
-1. 先执行元素替换生成新化学式
-2. 优先从 Materials Project 查询真实物性数据
-3. 如果 MP 没有，使用结构计算值并标注"需 DFT 计算"
-
-详见 [元素替换工具文档](doc/element_substitution.md)。
-
-### 如何添加新工具？
-
-在 `backend/skills/` 下创建新文件继承 `BaseTool`，然后在 `agent.py` 中注册即可。
-
-### 如何进行磁性材料生成？
-
-在 AI 助手中输入类似“帮我设计几个新的磁性材料候选”。用户不需要知道 MatterGen，系统会识别设计新材料的目标并创建后台任务。前端通过 WebSocket 实时显示进度，生成后的候选可以在列表中连续切换并在 3D 视图中查看。
-
-MatterGen 的条件生成不代表目标磁密度已经得到验证，后续仍需独立磁性预测器或 DFT 计算。
-
-系统同时支持指定元素体系、稳定性、带隙、体积模量和空间群等生成目标。输入“使用所有模型全面探索新型磁性材料”可以创建多模型 Campaign；模型会顺序执行并汇总候选。
-
-## 🐛 故障排除
-
-| 问题 | 解决方案 |
-|------|----------|
-| `LLM_API_KEY 未配置` | 检查 `.env` 中 `LLM_API_KEY` 是否正确设置 |
-| `Insufficient Balance` | LLM API 余额不足，需充值或更换 Key |
-| `401 Unauthorized` | 检查 `.env` 中 API Key 是否正确 |
-| 3D 画布不显示 | 使用 Chrome/Firefox/Edge 最新版 |
-| `No module named 'pkg_resources'` | 确认 `setuptools<81` 已安装且没有重装 MatterGen 环境 |
-| MatterGen 权重缺失 | 使用 `/api/generation/models` 返回的路径和下载地址补齐对应模型 |
-
-**后端调试:**
 ```bash
 cd backend
-.venv/bin/python -m uvicorn main:app \
-  --reload --log-level debug
+.venv/bin/python -m pytest
+
+cd ../frontend
+npm run build
 ```
 
-## 📖 学习资源
+更多实现细节见 [后端文档](doc/backend.md)、[元素替换文档](doc/element_substitution.md) 和 [MatterGen 集成方案](doc/mattergen-integration-refactor-plan.md)。
 
-- [LangChain 官方文档](https://python.langchain.com/)
-- [LangGraph 文档](https://langchain-ai.github.io/langgraph/)
-- [后端详细文档](doc/backend.md)
-- [MatterGen 集成重构方案](doc/mattergen-integration-refactor-plan.md)
+## 许可证
 
-## 📄 许可证
-
-MIT License © 2026 Material-Copilot Project
-
-## 🙏 致谢
-
-- [Materials Project](https://materialsproject.org/) - 晶体结构数据
-- [3Dmol.js](https://3dmol.csb.pitt.edu/) - 3D 渲染引擎
+MIT License
