@@ -29,6 +29,7 @@ from dotenv import load_dotenv
 from agent import execute_agent, AgentResult
 from generation.manager import get_generation_manager
 from generation.router import router as generation_router
+from realtime.router import router as realtime_router
 from skills.material_search import MaterialSearchResult
 
 load_dotenv()
@@ -56,6 +57,7 @@ app = FastAPI(
 )
 
 app.include_router(generation_router)
+app.include_router(realtime_router)
 
 app.add_middleware(
     CORSMiddleware,

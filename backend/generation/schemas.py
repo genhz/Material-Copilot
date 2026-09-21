@@ -1,6 +1,6 @@
 """Pydantic schemas for MatterGen generation jobs."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
@@ -9,6 +9,16 @@ from pydantic import BaseModel, Field
 JobStatus = Literal[
     "queued",
     "running",
+    "completed",
+    "failed",
+    "cancelled",
+]
+
+JobPhase = Literal[
+    "queued",
+    "loading_model",
+    "generating",
+    "postprocessing",
     "completed",
     "failed",
     "cancelled",
@@ -29,10 +39,16 @@ class GenerationJob(BaseModel):
 
     job_id: str
     status: JobStatus = "queued"
+    phase: JobPhase = "queued"
     progress: float = Field(default=0.0, ge=0.0, le=1.0)
+    message: Optional[str] = None
+    sequence: int = 0
     model_id: str = "dft_mag_density"
     request: GenerationRequest
     created_at: datetime
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     error_code: Optional[str] = None
@@ -74,4 +90,3 @@ class ModelInfo(BaseModel):
     model_id: str
     available: bool
     conditions: list[str]
-

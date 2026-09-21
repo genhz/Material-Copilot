@@ -6,6 +6,11 @@ import {
   getGenerationCandidates,
   getGenerationJob,
 } from '../../api/material'
+import {
+  generationRealtimeUrl,
+  useRealtimeSocket,
+  type RealtimeMessage,
+} from '../../composables/useRealtimeSocket'
 import type {
   CandidateCollection,
   GeneratedCandidate,
@@ -29,8 +34,11 @@ const collection = ref<CandidateCollection | null>(null)
 const error = ref<string | null>(null)
 const isCancelling = ref(false)
 
-let pollTimer: ReturnType<typeof setTimeout> | null = null
+let fallbackTimer: ReturnType<typeof setTimeout> | null = null
 let requestToken = 0
+
+const { isConnected, connect, close, subscribe, unsubscribe } =
+  useRealtimeSocket(handleRealtimeMessage, handleRealtimeReconnect)
 
 const statusLabels: Record<GenerationStatus, string> = {
   queued: '排队中',
@@ -54,35 +62,46 @@ const isActive = computed(() => {
 
 const candidates = computed(() => collection.value?.candidates ?? [])
 
-function clearTimer() {
-  if (pollTimer) {
-    clearTimeout(pollTimer)
-    pollTimer = null
+function clearFallbackTimer() {
+  if (fallbackTimer) {
+    clearTimeout(fallbackTimer)
+    fallbackTimer = null
   }
 }
 
-function schedulePoll(jobId: string, token: number, delay: number) {
-  clearTimer()
-  pollTimer = setTimeout(() => {
-    void poll(jobId, token)
-  }, delay)
+function scheduleFallbackPoll(jobId: string, token: number) {
+  clearFallbackTimer()
+  fallbackTimer = setTimeout(async () => {
+    await refreshSnapshot(jobId, token)
+    if (!isConnected.value && isActive.value) {
+      scheduleFallbackPoll(jobId, token)
+    }
+  }, 15000)
 }
 
-async function poll(jobId: string, token: number) {
+async function loadCandidates(jobId: string, token: number) {
+  try {
+    const nextCollection = await getGenerationCandidates(jobId)
+    if (token !== requestToken) return
+    collection.value = nextCollection
+  } catch (requestError: any) {
+    if (token !== requestToken) return
+    error.value =
+      requestError.response?.data?.detail?.message ||
+      requestError.message ||
+      '无法读取候选结构'
+  }
+}
+
+async function refreshSnapshot(jobId: string, token: number) {
   try {
     const next = await getGenerationJob(jobId)
     if (token !== requestToken) return
-
     job.value = next
     error.value = null
 
     if (next.status === 'completed') {
-      collection.value = await getGenerationCandidates(jobId)
-      return
-    }
-
-    if (next.status === 'queued' || next.status === 'running') {
-      schedulePoll(jobId, token, next.status === 'queued' ? 1000 : 2000)
+      await loadCandidates(jobId, token)
     }
   } catch (requestError: any) {
     if (token !== requestToken) return
@@ -90,8 +109,38 @@ async function poll(jobId: string, token: number) {
       requestError.response?.data?.detail?.message ||
       requestError.message ||
       '无法查询生成任务'
-    schedulePoll(jobId, token, 5000)
   }
+}
+
+function handleRealtimeMessage(message: RealtimeMessage) {
+  if (
+    message.channel !== 'generation.job' ||
+    message.resource_id !== props.jobId
+  ) {
+    return
+  }
+
+  if (message.type === 'error') {
+    error.value = message.message || 'WebSocket 订阅失败'
+    return
+  }
+
+  if (!message.job) return
+
+  const next = message.job as GenerationJob
+  job.value = next
+  error.value = null
+
+  if (next.status === 'completed') {
+    void loadCandidates(next.job_id, requestToken)
+    unsubscribe('generation.job', next.job_id)
+    clearFallbackTimer()
+  }
+}
+
+function handleRealtimeReconnect() {
+  clearFallbackTimer()
+  void refreshSnapshot(props.jobId, requestToken)
 }
 
 async function cancel() {
@@ -100,7 +149,7 @@ async function cancel() {
   isCancelling.value = true
   try {
     job.value = await cancelGenerationJob(job.value.job_id)
-    clearTimer()
+    clearFallbackTimer()
   } catch (requestError: any) {
     error.value =
       requestError.response?.data?.detail?.message ||
@@ -116,18 +165,33 @@ watch(
   async (jobId) => {
     requestToken += 1
     const token = requestToken
-    clearTimer()
+    clearFallbackTimer()
     job.value = null
     collection.value = null
     error.value = null
-    await poll(jobId, token)
+    subscribe('generation.job', jobId)
+    connect(generationRealtimeUrl())
+    await refreshSnapshot(jobId, token)
+    if (!isConnected.value) {
+      scheduleFallbackPoll(jobId, token)
+    }
   },
   { immediate: true }
 )
 
+watch(isConnected, (connected) => {
+  if (connected) {
+    clearFallbackTimer()
+  } else if (props.jobId && isActive.value) {
+    scheduleFallbackPoll(props.jobId, requestToken)
+  }
+})
+
 onBeforeUnmount(() => {
   requestToken += 1
-  clearTimer()
+  clearFallbackTimer()
+  unsubscribe('generation.job', props.jobId)
+  close()
 })
 </script>
 
@@ -157,21 +221,29 @@ onBeforeUnmount(() => {
 
       <div class="generation-status">
         <div class="status-row">
-          <el-tag
-            :type="
-              job?.status === 'completed'
-                ? 'success'
-                : job?.status === 'failed'
-                  ? 'danger'
-                  : job?.status === 'cancelled'
-                    ? 'info'
-                    : 'primary'
-            "
-            effect="dark"
-            size="small"
-          >
-            {{ statusLabel }}
-          </el-tag>
+          <div class="status-tags">
+            <el-tag
+              :type="
+                job?.status === 'completed'
+                  ? 'success'
+                  : job?.status === 'failed'
+                    ? 'danger'
+                    : job?.status === 'cancelled'
+                      ? 'info'
+                      : 'primary'
+              "
+              effect="dark"
+              size="small"
+            >
+              {{ statusLabel }}
+            </el-tag>
+            <span
+              class="connection-state"
+              :class="{ connected: isConnected }"
+            >
+              {{ isConnected ? '实时' : '重连中' }}
+            </span>
+          </div>
           <span class="status-progress">{{ progressPercent }}%</span>
         </div>
         <el-progress
@@ -181,14 +253,17 @@ onBeforeUnmount(() => {
           :status="job?.status === 'failed' ? 'exception' : undefined"
         />
         <p class="status-note">
-          目标磁密度
-          <strong>
-            {{
-              job?.request
-                ? `${job.request.target_magnetic_density} Å⁻³`
-                : '加载中'
-            }}
-          </strong>
+          <span>
+            目标磁密度
+            <strong>
+              {{
+                job?.request
+                  ? `${job.request.target_magnetic_density} Å⁻³`
+                  : '加载中'
+              }}
+            </strong>
+          </span>
+          <span v-if="job?.message">{{ job.message }}</span>
         </p>
       </div>
 
@@ -207,7 +282,9 @@ onBeforeUnmount(() => {
 
       <div v-else-if="isActive" class="waiting-state">
         <el-icon class="is-loading" :size="24"><Refresh /></el-icon>
-        <span>正在执行扩散采样，M4 上可能需要较长时间。</span>
+        <span>
+          {{ job?.message || '正在执行扩散采样，M4 上可能需要较长时间。' }}
+        </span>
       </div>
 
       <div v-else-if="job?.status === 'cancelled'" class="waiting-state">
@@ -320,7 +397,25 @@ onBeforeUnmount(() => {
   font-size: 12px;
 }
 
+.status-tags {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.connection-state {
+  color: #f59e0b;
+  font-size: 11px;
+}
+
+.connection-state.connected {
+  color: #34d399;
+}
+
 .status-note {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
   margin: 0;
 }
 

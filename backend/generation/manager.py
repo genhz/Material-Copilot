@@ -12,6 +12,7 @@ from typing import Optional
 
 from config import MatterGenConfig, get_mattergen_config
 from generation.adapter import MatterGenAdapter
+from generation.events import RealtimeHub
 from generation.exceptions import (
     GenerationDisabledError,
     GenerationError,
@@ -36,6 +37,7 @@ class GenerationManager:
         self.config = config
         self.store = GenerationStore(config.artifact_root)
         self.adapter = MatterGenAdapter(config)
+        self.hub = RealtimeHub()
         self._semaphore: Optional[asyncio.Semaphore] = None
         self._tasks: set[asyncio.Task] = set()
         self._processes: dict[str, asyncio.subprocess.Process] = {}
@@ -98,14 +100,28 @@ class GenerationManager:
         job = self.store.update_job(
             job_id,
             status="cancelled",
+            phase="cancelled",
+            message="生成任务已取消。",
             completed_at=utc_now(),
             worker_pid=None,
         )
+        await self._publish_job(job_id, event_type="update")
 
         process = self._processes.get(job_id)
         if process is not None and process.returncode is None:
             await self._terminate_process(process)
         return job
+
+    def subscribe(self, channel: str, resource_id: str) -> asyncio.Queue:
+        return self.hub.add_subscriber(channel, resource_id)
+
+    def unsubscribe(
+        self,
+        channel: str,
+        resource_id: str,
+        queue: asyncio.Queue,
+    ) -> None:
+        self.hub.remove_subscriber(channel, resource_id, queue)
 
     async def available_models(self) -> list[ModelInfo]:
         available = False
@@ -164,6 +180,9 @@ class GenerationManager:
                 self._processes[job_id] = process
                 stdout_handle.close()
                 stderr_handle.close()
+                watch_task = asyncio.create_task(
+                    self._watch_job(job_id, process)
+                )
 
                 try:
                     return_code = await asyncio.wait_for(
@@ -175,51 +194,127 @@ class GenerationManager:
                     self.store.update_job(
                         job_id,
                         status="failed",
+                        phase="failed",
+                        message="MatterGen 生成任务超时。",
                         error_code="GENERATION_TIMEOUT",
                         error_message="MatterGen 生成任务超时。",
                         completed_at=utc_now(),
                         worker_pid=None,
                     )
+                    await self._publish_job(job_id, event_type="update")
                     return
 
                 if job_id in self._cancel_requested:
                     self._cancel_requested.discard(job_id)
                     return
 
+                await self._publish_job(job_id, event_type="update")
+
                 current = self.store.get_job(job_id)
                 if return_code != 0 and current.status not in {"failed", "cancelled"}:
                     self.store.update_job(
                         job_id,
                         status="failed",
+                        phase="failed",
+                        message=self._tail(stderr_path),
                         error_code="WORKER_FAILED",
                         error_message=self._tail(stderr_path),
                         completed_at=utc_now(),
                         worker_pid=None,
                     )
+                    await self._publish_job(job_id, event_type="update")
                 elif return_code == 0 and current.status == "running":
                     self.store.update_job(
                         job_id,
                         status="completed",
+                        phase="completed",
                         progress=1.0,
+                        message="生成任务已完成。",
                         completed_at=utc_now(),
                         worker_pid=None,
                     )
+                    await self._publish_job(job_id, event_type="update")
             except Exception as exc:
                 logger.exception("Unable to launch MatterGen worker")
                 self.store.update_job(
                     job_id,
                     status="failed",
+                    phase="failed",
+                    message=str(exc),
                     error_code="WORKER_FAILED",
                     error_message=str(exc),
                     completed_at=utc_now(),
                     worker_pid=None,
                 )
+                await self._publish_job(job_id, event_type="update")
             finally:
+                if "watch_task" in locals():
+                    watch_task.cancel()
+                    await asyncio.gather(watch_task, return_exceptions=True)
                 if not stdout_handle.closed:
                     stdout_handle.close()
                 if not stderr_handle.closed:
                     stderr_handle.close()
                 self._processes.pop(job_id, None)
+
+    async def _watch_job(
+        self,
+        job_id: str,
+        process: asyncio.subprocess.Process,
+    ) -> None:
+        last_signature = None
+        while True:
+            try:
+                job = self.store.get_job(job_id)
+            except Exception:
+                return
+
+            signature = (
+                job.status,
+                job.phase,
+                job.progress,
+                job.message,
+                job.sequence,
+            )
+            if signature != last_signature:
+                await self.hub.publish(
+                    "generation.job",
+                    job_id,
+                    {
+                        "type": "update",
+                        "channel": "generation.job",
+                        "resource_id": job_id,
+                        "job": job.model_dump(mode="json"),
+                    },
+                )
+                last_signature = signature
+
+            if job.status in {"completed", "failed", "cancelled"}:
+                return
+
+            if process.returncode is not None:
+                await asyncio.sleep(0.1)
+                if process.returncode is not None:
+                    await self._publish_job(job_id, event_type="update")
+                    return
+
+            await asyncio.sleep(0.25)
+
+    async def _publish_job(self, job_id: str, event_type: str) -> None:
+        try:
+            job = self.store.get_job(job_id)
+        except Exception:
+            return
+        await self.hub.publish(
+            "generation.job",
+            job_id,
+            {
+                "type": event_type,
+                "channel": "generation.job",
+                "resource_id": job_id,
+                "job": job.model_dump(mode="json"),
+            },
+        )
 
     @staticmethod
     async def _terminate_process(process: asyncio.subprocess.Process) -> None:
@@ -263,4 +358,3 @@ def get_generation_manager() -> GenerationManager:
     if _manager is None:
         _manager = GenerationManager(get_mattergen_config())
     return _manager
-

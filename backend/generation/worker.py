@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import time
 import traceback
 
 from config import get_mattergen_config
@@ -21,9 +22,34 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def _update_progress(store: GenerationStore, job_id: str, progress: float) -> None:
-    bounded = max(0.0, min(float(progress), 1.0))
-    store.update_job(job_id, progress=bounded)
+def _progress_reporter(store: GenerationStore, job_id: str):
+    last_progress = -1.0
+    last_write = 0.0
+
+    def report(**values) -> None:
+        nonlocal last_progress, last_write
+        sampled = max(0.0, min(float(values.get("progress", 0.0)), 1.0))
+        # Model loading occupies the first 5%, diffusion sampling the next 90%.
+        progress = 0.05 + (0.90 * sampled)
+        now = time.monotonic()
+        if (
+            progress < 1.0
+            and progress - last_progress < 0.01
+            and now - last_write < 1.0
+        ):
+            return
+
+        last_progress = progress
+        last_write = now
+        store.update_job(
+            job_id,
+            status="running",
+            phase="generating",
+            progress=progress,
+            message=f"扩散采样 {round(sampled * 100)}%",
+        )
+
+    return report
 
 
 def run_job(job_id: str) -> int:
@@ -39,7 +65,9 @@ def run_job(job_id: str) -> int:
     store.update_job(
         job_id,
         status="running",
+        phase="loading_model",
         progress=0.0,
+        message="正在加载 MatterGen 模型。",
         started_at=job.started_at or utc_now(),
         worker_pid=os.getpid(),
         error_code=None,
@@ -50,14 +78,19 @@ def run_job(job_id: str) -> int:
         adapter = MatterGenAdapter(config)
         adapter.preflight()
         job_dir = store.job_dir(job_id)
+        report_progress = _progress_reporter(store, job_id)
         adapter.generate(
             request=job.request,
             output_dir=job_dir,
-            progress_callback=lambda **values: _update_progress(
-                store,
-                job_id,
-                values.get("progress", 0.0),
-            ),
+            progress_callback=report_progress,
+        )
+
+        store.update_job(
+            job_id,
+            status="running",
+            phase="postprocessing",
+            progress=0.96,
+            message="正在解析和校验候选结构。",
         )
 
         collection = extract_candidates(
@@ -77,7 +110,9 @@ def run_job(job_id: str) -> int:
         store.update_job(
             job_id,
             status="completed",
+            phase="completed",
             progress=1.0,
+            message=f"已生成 {len(collection.candidates)} 个有效候选。",
             completed_at=utc_now(),
             worker_pid=None,
         )
@@ -87,6 +122,8 @@ def run_job(job_id: str) -> int:
         store.update_job(
             job_id,
             status="failed",
+            phase="failed",
+            message=exc.message,
             error_code=exc.code,
             error_message=exc.message,
             completed_at=utc_now(),
@@ -98,6 +135,8 @@ def run_job(job_id: str) -> int:
         store.update_job(
             job_id,
             status="failed",
+            phase="failed",
+            message=str(exc),
             error_code="GENERATION_FAILED",
             error_message=str(exc),
             completed_at=utc_now(),
@@ -116,4 +155,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

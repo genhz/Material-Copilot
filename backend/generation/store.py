@@ -46,10 +46,14 @@ class GenerationStore:
         job = GenerationJob(
             job_id=job_id,
             status="queued",
+            phase="queued",
             progress=0.0,
+            message="任务正在等待生成 Worker。",
+            sequence=0,
             model_id=model_id,
             request=request,
             created_at=utc_now(),
+            updated_at=utc_now(),
         )
         self.save_job(job)
         self.write_json(self.job_dir(job_id) / "request.json", request.model_dump(mode="json"))
@@ -73,6 +77,8 @@ class GenerationStore:
 
     def update_job(self, job_id: str, **updates: Any) -> GenerationJob:
         job = self.get_job(job_id)
+        updates["sequence"] = job.sequence + 1
+        updates["updated_at"] = utc_now()
         updated = job.model_copy(update=updates)
         self.save_job(updated)
         return updated

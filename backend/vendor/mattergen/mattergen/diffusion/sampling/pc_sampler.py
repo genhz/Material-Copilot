@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Generic, Mapping, Tuple, TypeVar
+from typing import Callable, Generic, Mapping, Tuple, TypeVar
 
 import torch
 from tqdm.auto import tqdm
@@ -99,7 +99,10 @@ class PredictorCorrector(Generic[Diffusable]):
 
     @torch.no_grad()
     def sample(
-        self, conditioning_data: BatchedData, mask: Mapping[str, torch.Tensor] | None = None
+        self,
+        conditioning_data: BatchedData,
+        mask: Mapping[str, torch.Tensor] | None = None,
+        progress_callback: Callable[[int, int], None] | None = None,
     ) -> SampleAndMean:
         """Create one sample for each of a batch of conditions.
         Args:
@@ -111,11 +114,19 @@ class PredictorCorrector(Generic[Diffusable]):
            (batch, mean_batch). The difference between these is that `mean_batch` has no noise added at the final denoising step.
 
         """
-        return self._sample_maybe_record(conditioning_data, mask=mask, record=False)[:2]
+        return self._sample_maybe_record(
+            conditioning_data,
+            mask=mask,
+            record=False,
+            progress_callback=progress_callback,
+        )[:2]
 
     @torch.no_grad()
     def sample_with_record(
-        self, conditioning_data: BatchedData, mask: Mapping[str, torch.Tensor] | None = None
+        self,
+        conditioning_data: BatchedData,
+        mask: Mapping[str, torch.Tensor] | None = None,
+        progress_callback: Callable[[int, int], None] | None = None,
     ) -> SampleAndMeanAndRecords:
         """Create one sample for each of a batch of conditions.
         Args:
@@ -127,7 +138,12 @@ class PredictorCorrector(Generic[Diffusable]):
            (batch, mean_batch). The difference between these is that `mean_batch` has no noise added at the final denoising step.
 
         """
-        return self._sample_maybe_record(conditioning_data, mask=mask, record=True)
+        return self._sample_maybe_record(
+            conditioning_data,
+            mask=mask,
+            record=True,
+            progress_callback=progress_callback,
+        )
 
     @torch.no_grad()
     def _sample_maybe_record(
@@ -135,6 +151,7 @@ class PredictorCorrector(Generic[Diffusable]):
         conditioning_data: BatchedData,
         mask: Mapping[str, torch.Tensor] | None = None,
         record: bool = False,
+        progress_callback: Callable[[int, int], None] | None = None,
     ) -> SampleAndMeanAndMaybeRecords:
         """Create one sample for each of a batch of conditions.
         Args:
@@ -154,7 +171,12 @@ class PredictorCorrector(Generic[Diffusable]):
         conditioning_data = conditioning_data.to(self._device)
         mask = {k: v.to(self._device) for k, v in mask.items()}
         batch = _sample_prior(self._multi_corruption, conditioning_data, mask=mask)
-        return self._denoise(batch=batch, mask=mask, record=record)
+        return self._denoise(
+            batch=batch,
+            mask=mask,
+            record=record,
+            progress_callback=progress_callback,
+        )
 
     @torch.no_grad()
     def _denoise(
@@ -162,6 +184,7 @@ class PredictorCorrector(Generic[Diffusable]):
         batch: Diffusable,
         mask: dict[str, torch.Tensor],
         record: bool = False,
+        progress_callback: Callable[[int, int], None] | None = None,
     ) -> SampleAndMeanAndMaybeRecords:
         """Denoise from a prior sample to a t=eps_t sample."""
         recorded_samples = None
@@ -218,6 +241,8 @@ class PredictorCorrector(Generic[Diffusable]):
             batch, mean_batch = _mask_replace(
                 samples_means=samples_means, batch=batch, mean_batch=mean_batch, mask=mask
             )
+            if progress_callback is not None:
+                progress_callback(i + 1, self.N)
 
         return batch, mean_batch, recorded_samples
 

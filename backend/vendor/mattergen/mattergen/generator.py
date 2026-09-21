@@ -66,12 +66,27 @@ def draw_samples_from_sampler(
         if progress_callback is not None:
             progress_callback(progress=batch_idx / len(condition_loader))
 
+        def step_progress(step: int, total_steps: int) -> None:
+            if progress_callback is not None:
+                progress_callback(
+                    progress=(batch_idx + step / total_steps)
+                    / len(condition_loader)
+                )
+
         # generate samples
         if record_trajectories:
-            sample, mean, intermediate_samples = sampler.sample_with_record(conditioning_data, mask)
+            sample, mean, intermediate_samples = sampler.sample_with_record(
+                conditioning_data,
+                mask,
+                progress_callback=step_progress,
+            )
             all_trajs_list.extend(list_of_time_steps_to_list_of_trajectories(intermediate_samples))
         else:
-            sample, mean = sampler.sample(conditioning_data, mask)
+            sample, mean = sampler.sample(
+                conditioning_data,
+                mask,
+                progress_callback=step_progress,
+            )
         all_samples_list.extend(mean.to_data_list())
 
     if progress_callback is not None:

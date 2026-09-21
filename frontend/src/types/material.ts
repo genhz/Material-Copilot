@@ -54,6 +54,15 @@ export type GenerationStatus =
   | 'failed'
   | 'cancelled'
 
+export type GenerationPhase =
+  | 'queued'
+  | 'loading_model'
+  | 'generating'
+  | 'postprocessing'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+
 export interface GenerationRequest {
   target_magnetic_density: number
   num_candidates?: number
@@ -64,12 +73,16 @@ export interface GenerationRequest {
 export interface GenerationJob {
   job_id: string
   status: GenerationStatus
+  phase: GenerationPhase
   progress: number
+  message?: string | null
+  sequence: number
   model_id: string
   request: GenerationRequest
   error_code?: string | null
   error_message?: string | null
   created_at: string
+  updated_at: string
   started_at?: string | null
   completed_at?: string | null
 }

@@ -179,6 +179,27 @@ GET    /api/generation/models
 
 Agent 的 `material_generation` Tool 只负责提交任务并返回 `job_id`。实际推理由 `generation.worker` 独立进程执行。
 
+### 5. WebSocket 实时事件
+
+前端通过统一的 WebSocket 网关订阅任务事件：
+
+```text
+ws://127.0.0.1:8000/api/ws
+```
+
+订阅消息：
+
+```json
+{
+  "action": "subscribe",
+  "channel": "generation.job",
+  "resource_id": "<job_id>",
+  "request_id": "<optional>"
+}
+```
+
+服务端依次返回 `connected`、`subscribed` 和 `snapshot`，之后持续推送 `update`、`heartbeat`，直到任务进入 `completed`、`failed` 或 `cancelled`。REST 状态和候选接口仍保留，用于首次加载、页面恢复和 WebSocket 断线降级。
+
 ## 学习要点
 
 1. **Tool 定义**: 如何将功能封装为 LLM 可调用的工具
