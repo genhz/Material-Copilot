@@ -7,6 +7,7 @@ import type { MaterialData } from '../../types/material'
 const emit = defineEmits<{
   materialFound: [data: MaterialData, action: 'chat' | 'render']
   generationStarted: [jobId: string]
+  campaignStarted: [campaignId: string]
 }>()
 
 const { messages, isChatting, sendMessage, clearChat } = useAIChat()
@@ -24,6 +25,10 @@ const suggestions = [
     label: '探索新材料',
     text: '给我一些还没被材料库收录的新型磁性材料候选',
   },
+  {
+    label: '多模型全面探索',
+    text: '使用所有模型全面探索新型磁性材料',
+  },
 ]
 
 const handleSend = async () => {
@@ -32,7 +37,9 @@ const handleSend = async () => {
   inputMessage.value = ''
 
   const result = await sendMessage(text)
-  if (result.action === 'generate' && result.jobId) {
+  if (result.action === 'campaign' && result.campaignId) {
+    emit('campaignStarted', result.campaignId)
+  } else if (result.action === 'generate' && result.jobId) {
     emit('generationStarted', result.jobId)
   } else if (result.materialData) {
     emit(

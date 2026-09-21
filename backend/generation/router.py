@@ -5,6 +5,9 @@ from fastapi import APIRouter, HTTPException, status
 from generation.exceptions import GenerationError
 from generation.manager import get_generation_manager
 from generation.schemas import (
+    CampaignCandidateCollection,
+    CampaignJob,
+    CampaignRequest,
     CandidateCollection,
     GenerationJob,
     GenerationRequest,
@@ -67,3 +70,48 @@ async def cancel_generation_job(job_id: str) -> GenerationJob:
 @router.get("/models", response_model=list[ModelInfo])
 async def list_generation_models() -> list[ModelInfo]:
     return await get_generation_manager().available_models()
+
+
+@router.post(
+    "/campaigns",
+    response_model=CampaignJob,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def create_generation_campaign(
+    request: CampaignRequest,
+) -> CampaignJob:
+    try:
+        return await get_generation_manager().submit_campaign(request)
+    except GenerationError as exc:
+        _raise_http(exc)
+
+
+@router.get("/campaigns/{campaign_id}", response_model=CampaignJob)
+async def get_generation_campaign(campaign_id: str) -> CampaignJob:
+    try:
+        return await get_generation_manager().get_campaign(campaign_id)
+    except GenerationError as exc:
+        _raise_http(exc)
+
+
+@router.get(
+    "/campaigns/{campaign_id}/candidates",
+    response_model=CampaignCandidateCollection,
+)
+async def get_generation_campaign_candidates(
+    campaign_id: str,
+) -> CampaignCandidateCollection:
+    try:
+        return await get_generation_manager().get_campaign_candidates(
+            campaign_id
+        )
+    except GenerationError as exc:
+        _raise_http(exc)
+
+
+@router.post("/campaigns/{campaign_id}/cancel", response_model=CampaignJob)
+async def cancel_generation_campaign(campaign_id: str) -> CampaignJob:
+    try:
+        return await get_generation_manager().cancel_campaign(campaign_id)
+    except GenerationError as exc:
+        _raise_http(exc)

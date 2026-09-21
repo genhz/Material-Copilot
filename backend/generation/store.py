@@ -41,6 +41,7 @@ class GenerationStore:
         self,
         request: GenerationRequest,
         model_id: str,
+        model_label: Optional[str] = None,
     ) -> GenerationJob:
         job_id = str(uuid.uuid4())
         job = GenerationJob(
@@ -51,6 +52,7 @@ class GenerationStore:
             message="任务正在等待生成 Worker。",
             sequence=0,
             model_id=model_id,
+            model_label=model_label,
             request=request,
             created_at=utc_now(),
             updated_at=utc_now(),

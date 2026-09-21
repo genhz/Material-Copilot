@@ -27,7 +27,12 @@ from skills.chat import ChatTool
 from skills.element_substitution import ElementSubstitutionTool
 from skills.material_generation import MaterialGenerationTool
 from generation.manager import get_generation_manager
-from generation.schemas import GenerationRequest
+from generation.model_registry import list_model_specs
+from generation.schemas import (
+    CampaignRequest,
+    CampaignRunRequest,
+    GenerationRequest,
+)
 from intent.classifier import IntentClassifier
 from config import get_llm_config
 
@@ -145,6 +150,8 @@ class MaterialAgent:
             and decision.intent == "material_generation"
             and decision.confidence >= 0.75
         ):
+            if decision.campaign_requested:
+                return await self._start_campaign(decision)
             return await self._start_generation(message, decision)
 
         if decision and (
@@ -256,9 +263,10 @@ class MaterialAgent:
         manager = get_generation_manager()
         await manager.startup()
         request = GenerationRequest(
-            target_magnetic_density=decision.target_magnetic_density or 0.15,
+            model_id=decision.model_id,
+            conditions=decision.conditions,
             num_candidates=decision.num_candidates or 2,
-            guidance_scale=decision.guidance_scale or 2.0,
+            guidance_scale=decision.guidance_scale,
             seed=decision.seed,
         )
 
@@ -275,13 +283,72 @@ class MaterialAgent:
 
         return AgentResult(
             reply=(
-                f"已开始设计 {request.num_candidates} 个磁性材料候选，"
-                f"目标磁密度为 {request.target_magnetic_density} Å⁻³。"
+                f"已开始使用“{job.model_label or job.model_id}”生成 "
+                f"{job.request.num_candidates} 个材料候选。"
                 "生成过程会在候选面板中实时显示。"
             ),
             action="generate",
             material_data=None,
             job_id=job.job_id,
+        )
+
+    async def _start_campaign(self, decision) -> "AgentResult":
+        manager = get_generation_manager()
+        await manager.startup()
+
+        runs: list[CampaignRunRequest] = []
+        for spec in list_model_specs():
+            conditions = {
+                name: condition.default
+                for name, condition in spec.conditions.items()
+                if condition.default is not None
+            }
+            if spec.model_id == "dft_mag_density" and decision.target_magnetic_density:
+                conditions["dft_mag_density"] = decision.target_magnetic_density
+            if spec.model_id == "dft_mag_density_hhi_score":
+                if decision.target_magnetic_density:
+                    conditions["dft_mag_density"] = (
+                        decision.target_magnetic_density
+                    )
+                if decision.hhi_score is not None:
+                    conditions["hhi_score"] = decision.hhi_score
+
+            runs.append(
+                CampaignRunRequest(
+                    model_id=spec.model_id,
+                    conditions=conditions,
+                    num_candidates=1,
+                    guidance_scale=spec.default_guidance_scale,
+                    seed=decision.seed,
+                )
+            )
+
+        try:
+            campaign = await manager.submit_campaign(
+                CampaignRequest(
+                    name="多模型材料探索",
+                    runs=runs,
+                    max_concurrency=1,
+                )
+            )
+        except Exception as exc:
+            logger.exception("Unable to start generation campaign")
+            return AgentResult(
+                reply=f"暂时无法创建多模型生成任务：{exc}",
+                action="chat",
+                material_data=None,
+                job_id=None,
+            )
+
+        return AgentResult(
+            reply=(
+                f"已创建多模型探索任务，共包含 {len(runs)} 个模型。"
+                "任务会按顺序执行，并在候选面板中汇总结果。"
+            ),
+            action="campaign",
+            material_data=None,
+            job_id=None,
+            campaign_id=campaign.campaign_id,
         )
 
 
@@ -294,11 +361,13 @@ class AgentResult:
         action: str,  # "chat" | "render" | "generate"
         material_data=None,
         job_id: Optional[str] = None,
+        campaign_id: Optional[str] = None,
     ):
         self.reply = reply
         self.action = action
         self.material_data = material_data
         self.job_id = job_id
+        self.campaign_id = campaign_id
 
     def to_dict(self) -> dict:
         """转换为字典"""
@@ -307,6 +376,7 @@ class AgentResult:
             "action": self.action,
             "material_data": self.material_data.to_dict() if self.material_data else None,
             "job_id": self.job_id,
+            "campaign_id": self.campaign_id,
         }
 
 

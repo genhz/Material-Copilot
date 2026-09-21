@@ -46,6 +46,21 @@ const statusLabel = computed(() => {
   return job.value ? statusLabels[job.value.status] : '准备中'
 })
 
+const modelLabel = computed(() => {
+  return job.value?.model_label || job.value?.model_id || '材料生成'
+})
+
+const conditionText = computed(() => {
+  const conditions = job.value?.request.conditions || {}
+  const entries = Object.entries(conditions)
+  if (!entries.length && job.value?.request.target_magnetic_density != null) {
+    return `dft_mag_density=${job.value.request.target_magnetic_density}`
+  }
+  return entries.length
+    ? entries.map(([key, value]) => `${key}=${value}`).join(' · ')
+    : '无条件生成'
+})
+
 const selectedIndex = computed(() => {
   return candidates.value.findIndex(
     (candidate) => candidate.candidate_id === selectedCandidateId.value
@@ -136,15 +151,9 @@ function moveSelection(offset: number) {
         />
         <p class="status-note">
           <span>
-            目标磁密度
-            <strong>
-              {{
-                job?.request
-                  ? `${job.request.target_magnetic_density} Å⁻³`
-                  : '加载中'
-              }}
-            </strong>
+            <strong>{{ modelLabel }}</strong>
           </span>
+          <span>{{ conditionText }}</span>
           <span v-if="job?.message">{{ job.message }}</span>
         </p>
       </div>
@@ -342,6 +351,7 @@ function moveSelection(offset: number) {
 
 .status-note {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 12px;
   margin: 0;

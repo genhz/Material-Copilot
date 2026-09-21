@@ -6,8 +6,10 @@ import CrystalViewer from './crystal/CrystalViewer.vue'
 import MaterialPanel from './data/MaterialPanel.vue'
 import AIAssistant from './chat/AIAssistant.vue'
 import GenerationPanel from './generation/GenerationPanel.vue'
+import CampaignPanel from './generation/CampaignPanel.vue'
 import { useMaterialSearch } from '../composables/useMaterialSearch'
 import { useGeneration } from '../composables/useGeneration'
+import { useCampaign } from '../composables/useCampaign'
 import type { GeneratedCandidate, MaterialData } from '../types/material'
 
 interface Props {
@@ -40,7 +42,17 @@ const {
   selectCandidate,
 } = useGeneration()
 
+const {
+  campaignId,
+  panelOpen: campaignPanelOpen,
+  openCampaign,
+  restoreCampaign,
+  closePanel: closeCampaignPanel,
+  reopenPanel: reopenCampaignPanel,
+} = useCampaign()
+
 restoreGeneration()
+restoreCampaign()
 
 const handleSearch = (formula: string) => {
   doSearch(formula)
@@ -66,7 +78,13 @@ const handleThemeToggle = () => {
 }
 
 const handleGenerationStarted = (jobId: string) => {
+  closeCampaignPanel()
   openGeneration(jobId)
+}
+
+const handleCampaignStarted = (nextCampaignId: string) => {
+  closeGenerationPanel()
+  openCampaign(nextCampaignId)
 }
 
 const handleGeneratedCandidate = (candidate: GeneratedCandidate) => {
@@ -222,8 +240,14 @@ const handleGeneratedCandidate = (candidate: GeneratedCandidate) => {
       @close="closeGenerationPanel"
     />
 
+    <CampaignPanel
+      v-if="campaignPanelOpen"
+      @select-candidate="handleGeneratedCandidate"
+      @close="closeCampaignPanel"
+    />
+
     <button
-      v-if="generationJobId && !generationPanelOpen"
+      v-if="generationJobId && !generationPanelOpen && !campaignId"
       class="generation-reopen"
       type="button"
       @click="reopenGenerationPanel"
@@ -232,10 +256,21 @@ const handleGeneratedCandidate = (candidate: GeneratedCandidate) => {
       <span>候选列表 {{ generatedCandidates.length }}</span>
     </button>
 
+    <button
+      v-if="campaignId && !campaignPanelOpen"
+      class="generation-reopen campaign-reopen"
+      type="button"
+      @click="reopenCampaignPanel"
+    >
+      <el-icon :size="18"><Grid /></el-icon>
+      <span>多模型任务</span>
+    </button>
+
     <!-- AI Assistant (Top Layer) -->
     <AIAssistant
       @material-found="handleMaterialFound"
       @generation-started="handleGenerationStarted"
+      @campaign-started="handleCampaignStarted"
     />
   </div>
 </template>

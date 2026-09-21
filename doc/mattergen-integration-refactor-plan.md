@@ -470,8 +470,6 @@ export PYTORCH_ENABLE_MPS_FALLBACK=1
 
 ```text
 MATTERGEN_ENABLED=true
-MATTERGEN_MODEL_ID=dft_mag_density
-MATTERGEN_MODEL_PATH=vendor/mattergen/checkpoints/dft_mag_density
 MATTERGEN_ARTIFACT_ROOT=artifacts/generation
 MATTERGEN_MAX_CONCURRENCY=1
 MATTERGEN_JOB_RETENTION_DAYS=7
@@ -481,9 +479,8 @@ PYTORCH_ENABLE_MPS_FALLBACK=1
 
 配置要求：
 
-- 模型路径默认基于仓库根目录解析，不要硬编码 `/Users/genhz`
-- 客户端不能提交任意模型路径
-- 模型 ID 使用允许列表
+- 模型路径统一由 `model_registry.py` 管理，不要硬编码 `/Users/genhz`
+- 客户端只能提交注册表中的模型 ID
 - `MATTERGEN_ENABLED=false` 时，后端不导入或加载 MatterGen
 - 模型路径不存在时，API 仍能启动，但生成接口返回 `503`
 

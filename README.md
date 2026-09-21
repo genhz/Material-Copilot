@@ -186,6 +186,8 @@ material-sandbox/
 
 MatterGen 的条件生成不代表目标磁密度已经得到验证，后续仍需独立磁性预测器或 DFT 计算。
 
+系统同时支持指定元素体系、稳定性、带隙、体积模量和空间群等生成目标。输入“使用所有模型全面探索新型磁性材料”可以创建多模型 Campaign；模型会顺序执行并汇总候选。
+
 ## 🐛 故障排除
 
 | 问题 | 解决方案 |
@@ -195,7 +197,7 @@ MatterGen 的条件生成不代表目标磁密度已经得到验证，后续仍�
 | `401 Unauthorized` | 检查 `.env` 中 API Key 是否正确 |
 | 3D 画布不显示 | 使用 Chrome/Firefox/Edge 最新版 |
 | `No module named 'pkg_resources'` | 确认 `setuptools<81` 已安装且没有重装 MatterGen 环境 |
-| MatterGen Worker 启动失败 | 检查 `MATTERGEN_MODEL_PATH` 和 checkpoint 文件大小 |
+| MatterGen 权重缺失 | 使用 `/api/generation/models` 返回的路径和下载地址补齐对应模型 |
 
 **后端调试:**
 ```bash

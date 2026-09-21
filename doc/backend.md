@@ -121,8 +121,6 @@ print(f"API Key: {config.api_key}")   # e.g. "sk-..."
 | `LLM_MODEL` | 模型名称 |
 | `MP_API_KEY` | Materials Project API 密钥 |
 | `MATTERGEN_ENABLED` | 是否启用 MatterGen 生成功能 |
-| `MATTERGEN_MODEL_ID` | 模型 ID，首版为 `dft_mag_density` |
-| `MATTERGEN_MODEL_PATH` | 本地 checkpoint 目录 |
 | `MATTERGEN_MAX_CONCURRENCY` | Worker 最大并发，首版固定为 1 |
 | `MATTERGEN_WORKER_TIMEOUT_SECONDS` | Worker 超时时间 |
 
@@ -221,6 +219,41 @@ ws://127.0.0.1:8000/api/ws
 ```
 
 服务端依次返回 `connected`、`subscribed` 和 `snapshot`，之后持续推送 `update`、`heartbeat`，直到任务进入 `completed`、`failed` 或 `cancelled`。REST 状态和候选接口仍保留，用于首次加载、页面恢复和 WebSocket 断线降级。
+
+## MatterGen 模型注册表
+
+后端统一注册九种 MatterGen 权重：
+
+```text
+mattergen_base
+mp_20_base
+dft_mag_density
+dft_mag_density_hhi_score
+chemical_system
+chemical_system_energy_above_hull
+dft_band_gap
+ml_bulk_modulus
+space_group
+```
+
+模型条件由 `backend/generation/model_registry.py` 定义。请求可以通过 `conditions` 自动解析模型，也可以显式提交 `model_id`。
+
+模型列表接口：
+
+```text
+GET /api/generation/models
+```
+
+多模型 Campaign：
+
+```text
+POST /api/generation/campaigns
+GET  /api/generation/campaigns/{campaign_id}
+GET  /api/generation/campaigns/{campaign_id}/candidates
+POST /api/generation/campaigns/{campaign_id}/cancel
+```
+
+每个 Campaign 默认顺序执行模型，避免多个大模型同时占用 GPU 显存。
 
 ## 学习要点
 
