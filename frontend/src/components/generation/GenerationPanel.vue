@@ -1,44 +1,38 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { Close, Refresh, VideoPlay } from '@element-plus/icons-vue'
+import { computed } from 'vue'
 import {
-  cancelGenerationJob,
-  getGenerationCandidates,
-  getGenerationJob,
-} from '../../api/material'
-import {
-  generationRealtimeUrl,
-  useRealtimeSocket,
-  type RealtimeMessage,
-} from '../../composables/useRealtimeSocket'
+  ArrowLeft,
+  ArrowRight,
+  Close,
+  Delete,
+  Refresh,
+  VideoPlay,
+} from '@element-plus/icons-vue'
+import { useGeneration } from '../../composables/useGeneration'
 import type {
-  CandidateCollection,
   GeneratedCandidate,
-  GenerationJob,
   GenerationStatus,
 } from '../../types/material'
-
-interface Props {
-  jobId: string
-}
-
-const props = defineProps<Props>()
 
 const emit = defineEmits<{
   selectCandidate: [candidate: GeneratedCandidate]
   close: []
 }>()
 
-const job = ref<GenerationJob | null>(null)
-const collection = ref<CandidateCollection | null>(null)
-const error = ref<string | null>(null)
-const isCancelling = ref(false)
-
-let fallbackTimer: ReturnType<typeof setTimeout> | null = null
-let requestToken = 0
-
-const { isConnected, connect, close, subscribe, unsubscribe } =
-  useRealtimeSocket(handleRealtimeMessage, handleRealtimeReconnect)
+const {
+  job,
+  candidates,
+  collection,
+  selectedCandidateId,
+  error,
+  isCancelling,
+  isConnected,
+  isActive,
+  progressPercent,
+  selectCandidate,
+  cancel,
+  clearGeneration,
+} = useGeneration()
 
 const statusLabels: Record<GenerationStatus, string> = {
   queued: '排队中',
@@ -48,151 +42,29 @@ const statusLabels: Record<GenerationStatus, string> = {
   cancelled: '已取消',
 }
 
-const progressPercent = computed(() => {
-  return Math.round((job.value?.progress ?? 0) * 100)
-})
-
 const statusLabel = computed(() => {
   return job.value ? statusLabels[job.value.status] : '准备中'
 })
 
-const isActive = computed(() => {
-  return job.value?.status === 'queued' || job.value?.status === 'running'
+const selectedIndex = computed(() => {
+  return candidates.value.findIndex(
+    (candidate) => candidate.candidate_id === selectedCandidateId.value
+  )
 })
 
-const candidates = computed(() => collection.value?.candidates ?? [])
-
-function clearFallbackTimer() {
-  if (fallbackTimer) {
-    clearTimeout(fallbackTimer)
-    fallbackTimer = null
-  }
+function chooseCandidate(candidate: GeneratedCandidate) {
+  selectCandidate(candidate)
+  emit('selectCandidate', candidate)
 }
 
-function scheduleFallbackPoll(jobId: string, token: number) {
-  clearFallbackTimer()
-  fallbackTimer = setTimeout(async () => {
-    await refreshSnapshot(jobId, token)
-    if (!isConnected.value && isActive.value) {
-      scheduleFallbackPoll(jobId, token)
-    }
-  }, 15000)
+function moveSelection(offset: number) {
+  if (!candidates.value.length) return
+
+  const current = selectedIndex.value >= 0 ? selectedIndex.value : 0
+  const nextIndex =
+    (current + offset + candidates.value.length) % candidates.value.length
+  chooseCandidate(candidates.value[nextIndex])
 }
-
-async function loadCandidates(jobId: string, token: number) {
-  try {
-    const nextCollection = await getGenerationCandidates(jobId)
-    if (token !== requestToken) return
-    collection.value = nextCollection
-  } catch (requestError: any) {
-    if (token !== requestToken) return
-    error.value =
-      requestError.response?.data?.detail?.message ||
-      requestError.message ||
-      '无法读取候选结构'
-  }
-}
-
-async function refreshSnapshot(jobId: string, token: number) {
-  try {
-    const next = await getGenerationJob(jobId)
-    if (token !== requestToken) return
-    job.value = next
-    error.value = null
-
-    if (next.status === 'completed') {
-      await loadCandidates(jobId, token)
-    }
-  } catch (requestError: any) {
-    if (token !== requestToken) return
-    error.value =
-      requestError.response?.data?.detail?.message ||
-      requestError.message ||
-      '无法查询生成任务'
-  }
-}
-
-function handleRealtimeMessage(message: RealtimeMessage) {
-  if (
-    message.channel !== 'generation.job' ||
-    message.resource_id !== props.jobId
-  ) {
-    return
-  }
-
-  if (message.type === 'error') {
-    error.value = message.message || 'WebSocket 订阅失败'
-    return
-  }
-
-  if (!message.job) return
-
-  const next = message.job as GenerationJob
-  job.value = next
-  error.value = null
-
-  if (next.status === 'completed') {
-    void loadCandidates(next.job_id, requestToken)
-    unsubscribe('generation.job', next.job_id)
-    clearFallbackTimer()
-  }
-}
-
-function handleRealtimeReconnect() {
-  clearFallbackTimer()
-  void refreshSnapshot(props.jobId, requestToken)
-}
-
-async function cancel() {
-  if (!job.value || !isActive.value || isCancelling.value) return
-
-  isCancelling.value = true
-  try {
-    job.value = await cancelGenerationJob(job.value.job_id)
-    clearFallbackTimer()
-  } catch (requestError: any) {
-    error.value =
-      requestError.response?.data?.detail?.message ||
-      requestError.message ||
-      '取消失败'
-  } finally {
-    isCancelling.value = false
-  }
-}
-
-watch(
-  () => props.jobId,
-  async (jobId) => {
-    requestToken += 1
-    const token = requestToken
-    clearFallbackTimer()
-    job.value = null
-    collection.value = null
-    error.value = null
-    subscribe('generation.job', jobId)
-    connect(generationRealtimeUrl())
-    await refreshSnapshot(jobId, token)
-    if (!isConnected.value) {
-      scheduleFallbackPoll(jobId, token)
-    }
-  },
-  { immediate: true }
-)
-
-watch(isConnected, (connected) => {
-  if (connected) {
-    clearFallbackTimer()
-  } else if (props.jobId && isActive.value) {
-    scheduleFallbackPoll(props.jobId, requestToken)
-  }
-})
-
-onBeforeUnmount(() => {
-  requestToken += 1
-  clearFallbackTimer()
-  unsubscribe('generation.job', props.jobId)
-  close()
-})
 </script>
 
 <template>
@@ -212,6 +84,16 @@ onBeforeUnmount(() => {
             @click="cancel"
           >
             取消
+          </el-button>
+          <el-button
+            v-else
+            text
+            circle
+            size="small"
+            title="清除候选列表"
+            @click="clearGeneration"
+          >
+            <el-icon><Delete /></el-icon>
           </el-button>
           <el-button text circle size="small" @click="emit('close')">
             <el-icon><Close /></el-icon>
@@ -299,15 +181,49 @@ onBeforeUnmount(() => {
           </span>
         </div>
 
+        <div v-if="candidates.length" class="candidate-navigation">
+          <el-button
+            text
+            size="small"
+            :icon="ArrowLeft"
+            @click="moveSelection(-1)"
+          >
+            上一个
+          </el-button>
+          <span>
+            {{ selectedIndex >= 0 ? selectedIndex + 1 : '-' }}
+            / {{ candidates.length }}
+          </span>
+          <el-button
+            text
+            size="small"
+            @click="moveSelection(1)"
+          >
+            下一个
+            <el-icon class="el-icon--right"><ArrowRight /></el-icon>
+          </el-button>
+        </div>
+
         <div v-if="candidates.length" class="candidate-list">
           <button
             v-for="candidate in candidates"
             :key="candidate.candidate_id"
-            class="candidate-card"
-            @click="emit('selectCandidate', candidate)"
+            :class="[
+              'candidate-card',
+              { selected: candidate.candidate_id === selectedCandidateId },
+            ]"
+            @click="chooseCandidate(candidate)"
           >
             <div class="candidate-main">
-              <strong>{{ candidate.pretty_formula }}</strong>
+              <strong>
+                {{ candidate.pretty_formula }}
+                <span
+                  v-if="candidate.candidate_id === selectedCandidateId"
+                  class="selected-label"
+                >
+                  正在查看
+                </span>
+              </strong>
               <span>{{ candidate.candidate_id }}</span>
             </div>
             <div class="candidate-metrics">
@@ -335,11 +251,11 @@ onBeforeUnmount(() => {
 <style scoped>
 .generation-panel {
   position: fixed;
-  left: 24px;
+  right: 24px;
+  top: 96px;
   bottom: 24px;
   z-index: 35;
-  width: min(430px, calc(100vw - 48px));
-  max-height: min(620px, calc(100vh - 130px));
+  width: min(390px, calc(100vw - 48px));
   overflow-y: auto;
   padding: 18px;
   color: #e2e8f0;
@@ -353,10 +269,22 @@ onBeforeUnmount(() => {
 .generation-header,
 .status-row,
 .candidate-summary,
+.candidate-navigation,
 .candidate-card {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.candidate-navigation {
+  gap: 10px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.candidate-navigation > span {
+  min-width: 44px;
+  text-align: center;
 }
 
 .generation-header {
@@ -461,6 +389,19 @@ onBeforeUnmount(() => {
   transform: translateY(-1px);
 }
 
+.candidate-card.selected {
+  background: rgba(99, 102, 241, 0.18);
+  border-color: rgba(129, 140, 248, 0.72);
+  box-shadow: inset 3px 0 0 #818cf8;
+}
+
+.selected-label {
+  margin-left: 8px;
+  color: #a5b4fc;
+  font-size: 10px;
+  font-weight: 500;
+}
+
 .candidate-main {
   display: grid;
   gap: 3px;
@@ -492,6 +433,8 @@ onBeforeUnmount(() => {
 @media (max-width: 640px) {
   .generation-panel {
     left: 12px;
+    right: 12px;
+    top: auto;
     bottom: 12px;
     width: calc(100vw - 24px);
     max-height: calc(100vh - 120px);

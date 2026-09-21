@@ -46,8 +46,9 @@ class MaterialGenerationTool(BaseTool):
 
     name: str = "material_generation"
     description: str = (
-        "根据目标磁密度创建 MatterGen 材料生成任务。"
-        "用户要求生成、设计新的磁性材料候选时使用。"
+        "根据目标磁密度创建新材料候选任务。"
+        "用户要求生成、设计、发现、探索或寻找尚未确定的磁性材料候选时使用。"
+        "用户不需要知道 MatterGen 或任何内部模型名称。"
         "该工具只提交后台任务并返回 job_id，不等待扩散采样完成。"
         "不要把该工具用于预测已有材料的磁密度。"
         "参数包括 target_magnetic_density、num_candidates、guidance_scale 和 seed。"
@@ -118,4 +119,3 @@ class MaterialGenerationTool(BaseTool):
             },
             ensure_ascii=False,
         )
-

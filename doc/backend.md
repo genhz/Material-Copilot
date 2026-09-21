@@ -126,6 +126,28 @@ print(f"API Key: {config.api_key}")   # e.g. "sk-..."
 | `MATTERGEN_MAX_CONCURRENCY` | Worker 最大并发，首版固定为 1 |
 | `MATTERGEN_WORKER_TIMEOUT_SECONDS` | Worker 超时时间 |
 
+## 语义意图路由
+
+`backend/intent/` 提供结构化意图分类：
+
+```text
+science_chat
+material_lookup
+element_substitution
+material_generation
+clarification
+```
+
+高置信度生成请求会直接创建生成任务，不再完全依赖 ReAct Agent 自行选择工具。用户不需要知道 MatterGen，例如：
+
+```text
+帮我设计几种新的磁性材料
+给我一些还没有被材料库收录的候选结构
+想做高磁化强度材料，给我几个可能性
+```
+
+模糊请求会返回澄清问题，低置信度或复杂请求才交给 Agent 处理。
+
 ## LangChain 核心概念
 
 ### 1. Tool (工具)

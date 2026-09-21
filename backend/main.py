@@ -135,9 +135,10 @@ async def chat(request: ChatRequest):
     主聊天接口 — LangChain Agent 架构
 
     流程：
-    1. LangChain Agent 自动判断用户意图
-    2. Agent 决定调用哪个工具（chat 或 material_search）
-    3. 返回包含 action 字段的响应，前端据此决定 UI 行为
+    1. 结构化意图路由处理高置信度请求
+    2. 生成意图直接创建后台任务
+    3. 复杂或低置信度请求交给 LangChain Agent
+    4. 返回包含 action 字段的响应，前端据此决定 UI 行为
     """
     session_id = get_or_create_session(request.session_id)
 

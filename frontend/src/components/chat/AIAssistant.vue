@@ -14,6 +14,18 @@ const chatVisible = ref(false)
 const inputMessage = ref('')
 const chatContainerRef = ref<HTMLElement | null>(null)
 
+const suggestions = [
+  { label: '查看 Fe3O4', text: '查看 Fe3O4 的晶体结构' },
+  {
+    label: '设计高磁密度材料',
+    text: '帮我设计两个高磁密度磁性材料候选',
+  },
+  {
+    label: '探索新材料',
+    text: '给我一些还没被材料库收录的新型磁性材料候选',
+  },
+]
+
 const handleSend = async () => {
   const text = inputMessage.value.trim()
   if (!text || isChatting.value) return
@@ -29,6 +41,11 @@ const handleSend = async () => {
       result.action === 'render' ? 'render' : 'chat'
     )
   }
+}
+
+const handleSuggestion = async (text: string) => {
+  inputMessage.value = text
+  await handleSend()
 }
 
 const handleKeydown = (e: KeyboardEvent) => {
@@ -88,12 +105,12 @@ watch(messages, async () => {
             <p class="welcome-desc">输入材料化学式或提出问题</p>
             <div class="welcome-suggestions">
               <span
-                v-for="s in ['Nd2Fe14B', 'Fe3O4', 'LiCoO2']"
-                :key="s"
+                v-for="suggestion in suggestions"
+                :key="suggestion.label"
                 class="suggestion-chip"
-                @click="inputMessage = s"
+                @click="handleSuggestion(suggestion.text)"
               >
-                {{ s }}
+                {{ suggestion.label }}
               </span>
             </div>
           </div>

@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { Sunny, Moon } from '@element-plus/icons-vue'
+import { Grid, Sunny, Moon } from '@element-plus/icons-vue'
 import SearchBar from './crystal/SearchBar.vue'
 import CrystalViewer from './crystal/CrystalViewer.vue'
 import MaterialPanel from './data/MaterialPanel.vue'
 import AIAssistant from './chat/AIAssistant.vue'
 import GenerationPanel from './generation/GenerationPanel.vue'
 import { useMaterialSearch } from '../composables/useMaterialSearch'
+import { useGeneration } from '../composables/useGeneration'
 import type { GeneratedCandidate, MaterialData } from '../types/material'
 
 interface Props {
@@ -28,7 +29,18 @@ const {
 } = useMaterialSearch()
 
 const showCharts = ref(false)
-const activeGenerationJobId = ref<string | null>(null)
+const {
+  jobId: generationJobId,
+  candidates: generatedCandidates,
+  panelOpen: generationPanelOpen,
+  openGeneration,
+  restoreGeneration,
+  closePanel: closeGenerationPanel,
+  reopenPanel: reopenGenerationPanel,
+  selectCandidate,
+} = useGeneration()
+
+restoreGeneration()
 
 const handleSearch = (formula: string) => {
   doSearch(formula)
@@ -54,10 +66,11 @@ const handleThemeToggle = () => {
 }
 
 const handleGenerationStarted = (jobId: string) => {
-  activeGenerationJobId.value = jobId
+  openGeneration(jobId)
 }
 
 const handleGeneratedCandidate = (candidate: GeneratedCandidate) => {
+  selectCandidate(candidate)
   setMaterial({
     formula: candidate.formula,
     material_id: candidate.material_id,
@@ -74,7 +87,6 @@ const handleGeneratedCandidate = (candidate: GeneratedCandidate) => {
     elements: candidate.elements,
     pretty_formula: candidate.pretty_formula,
   })
-  activeGenerationJobId.value = null
 }
 </script>
 
@@ -205,11 +217,20 @@ const handleGeneratedCandidate = (candidate: GeneratedCandidate) => {
 
     <!-- MatterGen Candidate Panel -->
     <GenerationPanel
-      v-if="activeGenerationJobId"
-      :job-id="activeGenerationJobId"
+      v-if="generationPanelOpen"
       @select-candidate="handleGeneratedCandidate"
-      @close="activeGenerationJobId = null"
+      @close="closeGenerationPanel"
     />
+
+    <button
+      v-if="generationJobId && !generationPanelOpen"
+      class="generation-reopen"
+      type="button"
+      @click="reopenGenerationPanel"
+    >
+      <el-icon :size="18"><Grid /></el-icon>
+      <span>候选列表 {{ generatedCandidates.length }}</span>
+    </button>
 
     <!-- AI Assistant (Top Layer) -->
     <AIAssistant
@@ -462,6 +483,29 @@ export default { components: { TrendCharts } }
   background: rgba(15, 23, 42, 0.3);
 }
 
+.generation-reopen {
+  position: fixed;
+  right: 24px;
+  bottom: 98px;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  color: #e2e8f0;
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid rgba(99, 102, 241, 0.32);
+  border-radius: 12px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  backdrop-filter: blur(16px);
+}
+
+.generation-reopen:hover {
+  border-color: rgba(129, 140, 248, 0.6);
+  background: rgba(30, 41, 59, 0.96);
+}
+
 /* Transitions */
 .fade-enter-active,
 .fade-leave-active {
@@ -501,5 +545,12 @@ export default { components: { TrendCharts } }
 .slide-up-leave-to {
   opacity: 0;
   transform: translateY(20px);
+}
+
+@media (max-width: 640px) {
+  .generation-reopen {
+    right: 12px;
+    bottom: 96px;
+  }
 }
 </style>

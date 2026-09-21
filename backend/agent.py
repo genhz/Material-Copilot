@@ -26,6 +26,9 @@ from skills.material_search import MaterialSearchTool, MaterialSearchResult
 from skills.chat import ChatTool
 from skills.element_substitution import ElementSubstitutionTool
 from skills.material_generation import MaterialGenerationTool
+from generation.manager import get_generation_manager
+from generation.schemas import GenerationRequest
+from intent.classifier import IntentClassifier
 from config import get_llm_config
 
 logger = logging.getLogger(__name__)
@@ -45,6 +48,7 @@ AGENT_SYSTEM_PROMPT = """你是一个材料科学助手，拥有以下工具：
 
 4. **material_generation**: 根据目标磁密度生成新的无机材料候选结构。
    - 例如："生成磁密度约 0.15 的磁性材料"、"设计两个高磁密度候选材料"
+   - 用户不需要知道 MatterGen；只要用户想发现、设计、探索或寻找新的材料候选，就应使用该工具
    - 该工具只创建后台任务并返回 job_id，不会等待生成完成
    - 不用于预测已有材料的磁密度
 
@@ -60,6 +64,7 @@ class MaterialAgent:
         self._llm: Optional[ChatOpenAI] = None
         self._agent = None
         self._tools = None
+        self._intent_classifier: Optional[IntentClassifier] = None
 
     @property
     def llm(self) -> ChatOpenAI:
@@ -89,6 +94,12 @@ class MaterialAgent:
         return self._tools
 
     @property
+    def intent_classifier(self) -> IntentClassifier:
+        if self._intent_classifier is None:
+            self._intent_classifier = IntentClassifier(self.llm)
+        return self._intent_classifier
+
+    @property
     def agent(self):
         """懒加载 Agent"""
         if self._agent is None:
@@ -115,6 +126,40 @@ class MaterialAgent:
         Returns:
             AgentResult: Agent 执行结果
         """
+        try:
+            decision = await self.intent_classifier.classify(message, history)
+        except Exception as exc:
+            logger.warning("Intent routing skipped: %s", exc)
+            decision = None
+
+        if decision is not None:
+            logger.info(
+                "[Intent] intent=%s confidence=%.2f clarification=%s",
+                decision.intent,
+                decision.confidence,
+                decision.needs_clarification,
+            )
+
+        if (
+            decision
+            and decision.intent == "material_generation"
+            and decision.confidence >= 0.75
+        ):
+            return await self._start_generation(message, decision)
+
+        if decision and (
+            decision.intent == "clarification" or decision.needs_clarification
+        ):
+            return AgentResult(
+                reply=(
+                    decision.clarification_question
+                    or "请再说明你希望寻找的材料目标，我可以继续为你设计候选。"
+                ),
+                action="chat",
+                material_data=None,
+                job_id=None,
+            )
+
         # 构建消息历史
         messages = []
 
@@ -206,6 +251,38 @@ class MaterialAgent:
                 material_data=None,
                 job_id=None,
             )
+
+    async def _start_generation(self, message: str, decision) -> "AgentResult":
+        manager = get_generation_manager()
+        await manager.startup()
+        request = GenerationRequest(
+            target_magnetic_density=decision.target_magnetic_density or 0.15,
+            num_candidates=decision.num_candidates or 2,
+            guidance_scale=decision.guidance_scale or 2.0,
+            seed=decision.seed,
+        )
+
+        try:
+            job = await manager.submit(request)
+        except Exception as exc:
+            logger.exception("Unable to start material generation")
+            return AgentResult(
+                reply=f"暂时无法创建材料生成任务：{exc}",
+                action="chat",
+                material_data=None,
+                job_id=None,
+            )
+
+        return AgentResult(
+            reply=(
+                f"已开始设计 {request.num_candidates} 个磁性材料候选，"
+                f"目标磁密度为 {request.target_magnetic_density} Å⁻³。"
+                "生成过程会在候选面板中实时显示。"
+            ),
+            action="generate",
+            material_data=None,
+            job_id=job.job_id,
+        )
 
 
 class AgentResult:
