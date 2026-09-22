@@ -84,7 +84,7 @@ function moveSelection(offset: number) {
 
 <template>
   <Transition name="generation-slide">
-    <section class="generation-panel">
+    <el-card class="generation-panel" shadow="always">
       <header class="generation-header">
         <div>
           <div class="generation-eyebrow">MatterGen</div>
@@ -129,7 +129,7 @@ function moveSelection(offset: number) {
                       ? 'info'
                       : 'primary'
               "
-              effect="dark"
+              effect="light"
               size="small"
             >
               {{ statusLabel }}
@@ -253,7 +253,7 @@ function moveSelection(offset: number) {
           :image-size="64"
         />
       </div>
-    </section>
+    </el-card>
   </Transition>
 </template>
 
@@ -266,13 +266,6 @@ function moveSelection(offset: number) {
   z-index: 35;
   width: min(390px, calc(100vw - 48px));
   overflow-y: auto;
-  padding: 18px;
-  color: #e2e8f0;
-  background: rgba(15, 23, 42, 0.94);
-  border: 1px solid rgba(99, 102, 241, 0.24);
-  border-radius: 16px;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(22px) saturate(150%);
 }
 
 .generation-header,
@@ -287,7 +280,6 @@ function moveSelection(offset: number) {
 
 .candidate-navigation {
   gap: 10px;
-  color: #94a3b8;
   font-size: 12px;
 }
 
@@ -307,7 +299,7 @@ function moveSelection(offset: number) {
 }
 
 .generation-eyebrow {
-  color: #818cf8;
+  color: var(--el-color-primary);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 1px;
@@ -330,7 +322,6 @@ function moveSelection(offset: number) {
 .candidate-main span,
 .candidate-metrics,
 .candidate-summary {
-  color: #94a3b8;
   font-size: 12px;
 }
 
@@ -341,12 +332,12 @@ function moveSelection(offset: number) {
 }
 
 .connection-state {
-  color: #f59e0b;
+  color: var(--el-color-warning);
   font-size: 11px;
 }
 
 .connection-state.connected {
-  color: #34d399;
+  color: var(--el-color-success);
 }
 
 .status-note {
@@ -357,16 +348,11 @@ function moveSelection(offset: number) {
   margin: 0;
 }
 
-.status-note strong {
-  color: #cbd5e1;
-}
-
 .waiting-state {
   display: flex;
   align-items: center;
   gap: 10px;
   min-height: 88px;
-  color: #94a3b8;
   font-size: 13px;
 }
 
@@ -384,30 +370,28 @@ function moveSelection(offset: number) {
   width: 100%;
   gap: 12px;
   padding: 12px;
-  color: inherit;
   text-align: left;
-  background: rgba(51, 65, 85, 0.42);
-  border: 1px solid rgba(99, 102, 241, 0.16);
+  background: var(--el-fill-color-light);
+  border: 1px solid var(--el-border-color-light);
   border-radius: 10px;
   cursor: pointer;
   transition: border-color 0.2s, background 0.2s, transform 0.2s;
 }
 
 .candidate-card:hover {
-  background: rgba(51, 65, 85, 0.62);
-  border-color: rgba(129, 140, 248, 0.48);
+  background: var(--el-fill-color);
+  border-color: var(--el-color-primary-light-5);
   transform: translateY(-1px);
 }
 
 .candidate-card.selected {
-  background: rgba(99, 102, 241, 0.18);
-  border-color: rgba(129, 140, 248, 0.72);
-  box-shadow: inset 3px 0 0 #818cf8;
+  background: var(--el-color-primary-light-9);
+  border-color: var(--el-color-primary);
 }
 
 .selected-label {
   margin-left: 8px;
-  color: #a5b4fc;
+  color: var(--el-color-primary);
   font-size: 10px;
   font-weight: 500;
 }
@@ -419,7 +403,6 @@ function moveSelection(offset: number) {
 }
 
 .candidate-main strong {
-  color: #f1f5f9;
   font-size: 14px;
 }
 

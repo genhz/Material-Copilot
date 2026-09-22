@@ -39,7 +39,6 @@ const handleKeydown = (e: KeyboardEvent) => {
     <el-button
       type="primary"
       size="large"
-      class="search-btn"
       @click="handleSearch"
     >
       查询
@@ -57,24 +56,5 @@ const handleKeydown = (e: KeyboardEvent) => {
 
 .search-input {
   min-width: 260px;
-}
-
-.search-btn {
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
-  border: none;
-  border-radius: 10px;
-  padding: 0 20px;
-  font-weight: 600;
-  color: #fff;
-  transition: all 0.2s;
-}
-
-.search-btn:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.4);
-}
-
-.search-btn:active {
-  transform: translateY(0);
 }
 </style>

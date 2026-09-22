@@ -1,193 +1,162 @@
 <script setup lang="ts">
-import { ref, onMounted, watch, onBeforeUnmount, nextTick, computed } from 'vue'
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from 'vue'
+import CrystalViewerControls from './CrystalViewerControls.vue'
+import { MolstarAdapter } from '../../services/molstarAdapter'
+import { useCrystalViewSettings } from '../../composables/useCrystalViewSettings'
 
 interface Props {
   cifData: string | null
   isLoading?: boolean
-  isDarkMode?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   cifData: null,
   isLoading: false,
-  isDarkMode: true,
 })
 
 const containerRef = ref<HTMLElement | null>(null)
-let viewer: any = null
+const adapter = new MolstarAdapter()
+const { settings, resetSupercell } = useCrystalViewSettings()
 
-// 背景色
-const bgColorHex = computed(() => props.isDarkMode ? 0x0f172a : 0xf8fafc)
+const viewerReady = ref(false)
+const isRendering = ref(false)
+const renderError = ref<string | null>(null)
 
-// 元素颜色映射 (Jmol 配色方案)
-const elementColors: Record<string, string> = {
-  H: '#FFFFFF', He: '#D9FFFF',
-  Li: '#CC80FF', Be: '#C2FF00', B: '#FFB5B5', C: '#909090',
-  N: '#3050F8', O: '#FF0D0D', F: '#90E050', Ne: '#B3E3F5',
-  Na: '#AB5CF2', Mg: '#8AFF00', Al: '#BFA6A6', Si: '#F0C8A0',
-  P: '#FF8000', S: '#FFFF30', Cl: '#1FF01F', Ar: '#80D1E3',
-  K: '#8F40D4', Ca: '#3DFF00', Sc: '#E6E6E6', Ti: '#BFC2C7',
-  V: '#A6A6AB', Cr: '#8A99C7', Mn: '#9C7AC7', Fe: '#E06633',
-  Co: '#F090A0', Ni: '#50D050', Cu: '#C88033', Zn: '#7D80B0',
-  Ga: '#C28F8F', Ge: '#668F8F', As: '#BD80E3', Se: '#FFA100',
-  Br: '#A62929', Kr: '#5CB8D1',
-  Rb: '#702EB0', Sr: '#00FF00', Y: '#94FFFF', Zr: '#94E0E0',
-  Nb: '#73C2C9', Mo: '#54B5B5', Tc: '#3B9E9E', Ru: '#248F8F',
-  Rh: '#0A7D8C', Pd: '#006985', Ag: '#C0C0C0', Cd: '#FFD98F',
-  In: '#A67573', Sn: '#668080', Sb: '#9E63B5', Te: '#D47A00',
-  I: '#940094', Xe: '#429EB0',
-  Cs: '#57178F', Ba: '#00C900', La: '#70D4FF', Ce: '#FFFFC7',
-  Pr: '#D9FFC7', Nd: '#C7FFC7', Pm: '#A3FFC7', Sm: '#8FFFC7',
-  Eu: '#61FFC7', Gd: '#45FFC7', Tb: '#30FFC7', Dy: '#1FFFC7',
-  Ho: '#00FF9C', Er: '#00E675', Tm: '#00D452', Yb: '#00BF38',
-  Lu: '#00AB24', Hf: '#4DC2FF', Ta: '#4DA6FF', W: '#2194D6',
-  Re: '#267DAB', Os: '#266696', Ir: '#175487', Pt: '#D0D0E0',
-  Au: '#FFD123', Hg: '#B8B8D0', Tl: '#A6544D', Pb: '#575961',
-  Bi: '#9E4FB5', Po: '#AB5C00', At: '#754F45', Rn: '#428296',
+let lastCif: string | null = null
+let renderQueue = Promise.resolve()
+
+const showControls = computed(() => Boolean(props.cifData))
+const showLoading = computed(
+  () => props.isLoading || !viewerReady.value || isRendering.value
+)
+
+function queueRender() {
+  renderQueue = renderQueue
+    .then(async () => {
+      if (!viewerReady.value) return
+      const cif = props.cifData
+      if (!cif) {
+        await adapter.render('', settings)
+        return
+      }
+
+      isRendering.value = true
+      renderError.value = null
+      try {
+        await adapter.render(cif, settings)
+      } catch (error: any) {
+        console.error('[Molstar] Render failed:', error)
+        renderError.value = error?.message || '晶体结构渲染失败'
+      } finally {
+        isRendering.value = false
+      }
+    })
+    .catch((error) => {
+      console.error('[Molstar] Render queue failed:', error)
+    })
 }
 
-// 标签背景色 (根据主题动态调整)
-const labelBgColor = computed(() => props.isDarkMode ? 'rgba(0, 0, 0, 0.7)' : 'rgba(255, 255, 255, 0.85)')
-
-// 获取元素符号 (从原子标签中提取)
-function getElementSymbol(label: string): string {
-  const match = label.match(/^([A-Z][a-z]?)/)
-  return match ? match[1] : label
-}
-
-const initViewer = async () => {
+async function initializeViewer() {
   if (!containerRef.value) return
   await nextTick()
 
-  if (typeof ($3Dmol as any) !== 'undefined') {
-    viewer = ($3Dmol as any).createViewer(containerRef.value, {
-      backgroundColor: bgColorHex.value,
-      disableCartoon: true,
-      antialias: true,
-      orthographic: false,
-    })
-
-    if (!props.cifData) {
-      viewer.addLabel('等待加载晶体结构...', {
-        position: { x: 0, y: 0, z: 0 },
-        fontSize: 20,
-        fontColor: props.isDarkMode ? '#64748b' : '#94a3b8',
-        backgroundColor: props.isDarkMode ? 'rgba(15, 23, 42, 0.8)' : 'rgba(255, 255, 255, 0.8)',
-      })
-      viewer.render()
-    }
-  } else {
-    console.error('$3Dmol not loaded')
+  try {
+    await adapter.mount(containerRef.value)
+    viewerReady.value = true
+    lastCif = props.cifData
+    queueRender()
+  } catch (error: any) {
+    console.error('[Molstar] Initialization failed:', error)
+    renderError.value = error?.message || '3D 查看器初始化失败'
   }
 }
 
-// 监听主题变化，同步更新 3Dmol 背景色
-watch(() => props.isDarkMode, (dark) => {
-  if (!viewer) return
-  const color = dark ? 0x0f172a : 0xf8fafc
-  viewer.setBackgroundColor(color)
-  viewer.render()
-})
-
 watch(
   () => props.cifData,
-  async (newCif) => {
-    if (!viewer || !newCif) return
-    await nextTick()
-    viewer.clear()
-
-    try {
-      viewer.addModel(newCif, 'cif')
-
-      // 球棍模型
-      viewer.setStyle({}, {
-        sphere: { radius: 0.35, scale: 0.8 },
-        stick: { radius: 0.12 },
-      })
-
-      // 添加元素标签
-      const model = viewer.getModel()
-      if (model) {
-        const atoms = model.atoms
-        atoms.forEach((atom: any) => {
-          const elem = getElementSymbol(atom.elem)
-          const color = elementColors[elem] || (props.isDarkMode ? '#FFFFFF' : '#1e293b')
-
-          viewer.addLabel(elem, {
-            position: { x: atom.x, y: atom.y, z: atom.z },
-            fontSize: 14,
-            fontColor: color,
-            backgroundColor: labelBgColor.value,
-            borderColor: color,
-            borderWidth: 1,
-            padding: 3,
-          })
-        })
-      }
-
-      viewer.zoomTo()
-      viewer.addUnitCell()
-      viewer.render()
-    } catch (e) {
-      console.error('Failed to render CIF structure:', e)
-      viewer.addLabel('结构渲染失败', {
-        position: { x: 0, y: 0, z: 0 },
-        fontSize: 16,
-        fontColor: '#ef4444',
-      })
-      viewer.render()
+  (cif) => {
+    if (cif !== lastCif) {
+      lastCif = cif
+      resetSupercell()
     }
+    queueRender()
   }
 )
 
+watch(
+  settings,
+  () => {
+    queueRender()
+  },
+  { deep: true }
+)
+
 onMounted(() => {
-  initViewer()
-  // 窗口大小变化时重绘
-  window.addEventListener('resize', () => {
-    if (viewer) viewer.resize()
-  })
+  initializeViewer()
+  window.addEventListener('resize', handleResize)
 })
 
 onBeforeUnmount(() => {
-  if (viewer) {
-    viewer.clear()
-    viewer = null
-  }
+  window.removeEventListener('resize', handleResize)
+  adapter.dispose()
+})
+
+function handleResize() {
+  adapter.resize()
+}
+
+function resetView() {
+  adapter.resetView()
+}
+
+defineExpose({
+  resetView,
 })
 </script>
 
 <template>
-  <div class="crystal-viewer-container" :class="{ 'is-dark': isDarkMode }">
-    <div
-      v-if="isLoading"
-      class="loading-overlay"
-    >
-      <el-icon class="is-loading" :size="40"><Loading /></el-icon>
-      <span class="loading-text">正在加载晶体结构...</span>
+  <div class="crystal-viewer-container">
+    <div ref="containerRef" class="viewer-container"></div>
+
+    <Transition name="fade">
+      <div v-if="showLoading" class="loading-overlay">
+        <div class="loading-spinner"></div>
+        <span class="loading-text">
+          {{ isLoading ? '正在获取材料数据...' : '正在构建晶体结构...' }}
+        </span>
+      </div>
+    </Transition>
+
+    <div v-if="renderError" class="render-error">
+      <el-alert
+        :title="renderError"
+        type="error"
+        :closable="false"
+        show-icon
+      />
     </div>
 
-    <div ref="containerRef" class="viewer-container"></div>
+    <Transition name="slide-up">
+      <div v-if="showControls" class="crystal-controls-overlay">
+        <CrystalViewerControls @reset-view="resetView" />
+      </div>
+    </Transition>
   </div>
 </template>
-
-<script lang="ts">
-import { Loading } from '@element-plus/icons-vue'
-export default { components: { Loading } }
-</script>
 
 <style scoped>
 .crystal-viewer-container {
   position: fixed;
-  top: 0;
-  left: 0;
+  inset: 0;
   width: 100vw;
   height: 100vh;
-  background: #f8fafc;
   overflow: hidden;
-}
-
-.crystal-viewer-container.is-dark {
-  background: #0f172a;
 }
 
 .viewer-container {
@@ -198,17 +167,75 @@ export default { components: { Loading } }
 .loading-overlay {
   position: absolute;
   inset: 0;
-  background: rgba(15, 23, 42, 0.9);
+  z-index: 10;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  z-index: 10;
+  color: var(--el-text-color-secondary);
+  background: var(--el-mask-color-extra-light);
+  backdrop-filter: blur(8px);
 }
 
 .loading-text {
-  color: #94a3b8;
   margin-top: 16px;
   font-size: 14px;
+}
+
+.loading-spinner {
+  width: 38px;
+  height: 38px;
+  border: 3px solid var(--el-color-primary-light-7);
+  border-top-color: var(--el-color-primary);
+  border-radius: 50%;
+  animation: crystal-spin 0.8s linear infinite;
+}
+
+@keyframes crystal-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.render-error {
+  position: fixed;
+  top: 96px;
+  left: 50%;
+  z-index: 40;
+  width: min(520px, calc(100vw - 48px));
+  transform: translateX(-50%);
+}
+
+.crystal-controls-overlay {
+  position: fixed;
+  bottom: 58px;
+  left: 50%;
+  z-index: 32;
+  transform: translateX(-50%);
+}
+
+.fade-enter-active,
+.fade-leave-active,
+.slide-up-enter-active,
+.slide-up-leave-active {
+  transition: opacity 0.25s, transform 0.25s;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+.slide-up-enter-from,
+.slide-up-leave-to {
+  opacity: 0;
+  transform: translate(-50%, 14px);
+}
+
+@media (max-width: 640px) {
+  .crystal-controls-overlay {
+    bottom: 52px;
+    width: calc(100vw - 24px);
+  }
 }
 </style>

@@ -74,14 +74,14 @@ watch(messages, async () => {
   <Teleport to="body">
     <!-- Chat Panel -->
     <Transition name="chat-slide">
-      <div
+      <el-card
         v-if="chatVisible"
         class="chat-panel"
+        shadow="always"
       >
-        <!-- Header -->
-        <div class="chat-header">
+        <template #header>
           <div class="chat-header-title">
-            <el-icon :size="18" color="#818cf8"><ChatDotRound /></el-icon>
+            <el-icon><ChatDotRound /></el-icon>
             <span>AI 材料助手</span>
           </div>
           <div class="chat-header-actions">
@@ -102,7 +102,7 @@ watch(messages, async () => {
               <el-icon :size="16"><Close /></el-icon>
             </el-button>
           </div>
-        </div>
+        </template>
 
         <!-- Messages -->
         <div ref="chatContainerRef" class="chat-messages">
@@ -111,14 +111,15 @@ watch(messages, async () => {
             <p class="welcome-title">你好，我是 AI 材料助手</p>
             <p class="welcome-desc">输入材料化学式或提出问题</p>
             <div class="welcome-suggestions">
-              <span
+              <el-tag
                 v-for="suggestion in suggestions"
                 :key="suggestion.label"
+                effect="plain"
                 class="suggestion-chip"
                 @click="handleSuggestion(suggestion.text)"
               >
                 {{ suggestion.label }}
-              </span>
+              </el-tag>
             </div>
           </div>
 
@@ -127,19 +128,16 @@ watch(messages, async () => {
             :key="msg.id"
             :class="['message', msg.role === 'user' ? 'message-user' : 'message-ai']"
           >
-            <div
-              v-if="msg.role !== 'user'"
-              class="message-avatar"
-            >
+            <el-avatar v-if="msg.role !== 'user'" :size="32">
               🤖
-            </div>
+            </el-avatar>
             <div class="message-bubble">
               <p class="message-content">{{ msg.content }}</p>
             </div>
           </div>
 
           <div v-if="isChatting" class="message message-ai">
-            <div class="message-avatar">🤖</div>
+            <el-avatar :size="32">🤖</el-avatar>
             <div class="message-bubble message-bubble-loading">
               <el-icon class="is-loading" :size="18" color="#818cf8">
                 <Loading />
@@ -168,24 +166,20 @@ watch(messages, async () => {
             @click="handleSend"
           />
         </div>
-      </div>
+      </el-card>
     </Transition>
 
     <!-- Floating Action Button -->
-    <div
-      class="ai-fab"
-      :class="{ 'fab-active': chatVisible }"
-      @click="chatVisible = !chatVisible"
-    >
-      <div class="fab-ring"></div>
-      <div class="fab-icon">
-        <el-icon :size="26" color="white">
-          <ChatDotRound v-if="!chatVisible" />
-          <Close v-else />
-        </el-icon>
-      </div>
-      <div class="fab-tooltip">AI 助手</div>
-    </div>
+    <el-tooltip content="AI 助手" placement="left">
+      <el-button
+        class="ai-fab"
+        type="primary"
+        circle
+        size="large"
+        :icon="chatVisible ? Close : ChatDotRound"
+        @click="chatVisible = !chatVisible"
+      />
+    </el-tooltip>
   </Teleport>
 </template>
 
@@ -195,74 +189,6 @@ watch(messages, async () => {
   bottom: 32px;
   right: 32px;
   z-index: 50;
-  cursor: pointer;
-}
-
-.fab-ring {
-  position: absolute;
-  inset: -4px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #6366f1, #8b5cf6, #a78bfa);
-  opacity: 0.5;
-  animation: fab-pulse 2s ease-in-out infinite;
-}
-
-.fab-icon {
-  position: relative;
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 4px 20px rgba(99, 102, 241, 0.4);
-  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s;
-}
-
-.fab-icon:hover {
-  transform: scale(1.08);
-  box-shadow: 0 6px 28px rgba(99, 102, 241, 0.5);
-}
-
-.fab-icon:active {
-  transform: scale(0.95);
-}
-
-.fab-active .fab-icon {
-  background: linear-gradient(135deg, #475569, #334155);
-}
-
-.fab-tooltip {
-  position: absolute;
-  right: 68px;
-  top: 50%;
-  transform: translateY(-50%);
-  background: rgba(15, 23, 42, 0.9);
-  color: #e2e8f0;
-  padding: 6px 12px;
-  border-radius: 8px;
-  font-size: 13px;
-  white-space: nowrap;
-  opacity: 0;
-  transition: opacity 0.2s;
-  pointer-events: none;
-  backdrop-filter: blur(8px);
-}
-
-.ai-fab:hover .fab-tooltip {
-  opacity: 1;
-}
-
-@keyframes fab-pulse {
-  0%, 100% {
-    transform: scale(1);
-    opacity: 0.3;
-  }
-  50% {
-    transform: scale(1.15);
-    opacity: 0.1;
-  }
 }
 
 .chat-panel {
@@ -272,30 +198,29 @@ watch(messages, async () => {
   width: 400px;
   height: 560px;
   z-index: 50;
-  background: rgba(15, 23, 42, 0.92);
-  backdrop-filter: blur(24px) saturate(150%);
-  -webkit-backdrop-filter: blur(24px) saturate(150%);
-  border-radius: 20px;
-  border: 1px solid rgba(99, 102, 241, 0.2);
-  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
-.chat-header {
+.chat-panel :deep(.el-card__header) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 20px 14px;
-  border-bottom: 1px solid rgba(99, 102, 241, 0.15);
+}
+
+.chat-panel :deep(.el-card__body) {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0;
 }
 
 .chat-header-title {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #e2e8f0;
   font-size: 15px;
   font-weight: 600;
 }
@@ -306,16 +231,6 @@ watch(messages, async () => {
   gap: 4px;
 }
 
-.clear-btn,
-.close-btn {
-  color: #94a3b8;
-}
-
-.clear-btn:hover,
-.close-btn:hover {
-  color: #f1f5f9;
-}
-
 .chat-messages {
   flex: 1;
   overflow-y: auto;
@@ -323,15 +238,6 @@ watch(messages, async () => {
   display: flex;
   flex-direction: column;
   gap: 12px;
-}
-
-.chat-messages::-webkit-scrollbar {
-  width: 4px;
-}
-
-.chat-messages::-webkit-scrollbar-thumb {
-  background: rgba(99, 102, 241, 0.3);
-  border-radius: 4px;
 }
 
 .chat-welcome {
@@ -347,14 +253,12 @@ watch(messages, async () => {
 }
 
 .welcome-title {
-  color: #e2e8f0;
   font-size: 16px;
   font-weight: 600;
   margin-bottom: 4px;
 }
 
 .welcome-desc {
-  color: #64748b;
   font-size: 13px;
   margin-bottom: 20px;
 }
@@ -364,23 +268,6 @@ watch(messages, async () => {
   gap: 8px;
   flex-wrap: wrap;
   justify-content: center;
-}
-
-.suggestion-chip {
-  padding: 6px 14px;
-  background: rgba(99, 102, 241, 0.15);
-  border: 1px solid rgba(99, 102, 241, 0.25);
-  border-radius: 20px;
-  color: #a5b4fc;
-  font-size: 13px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.suggestion-chip:hover {
-  background: rgba(99, 102, 241, 0.25);
-  border-color: rgba(99, 102, 241, 0.4);
-  color: #c7d2fe;
 }
 
 .message {
@@ -393,18 +280,6 @@ watch(messages, async () => {
   flex-direction: row-reverse;
 }
 
-.message-avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background: rgba(99, 102, 241, 0.2);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 16px;
-  flex-shrink: 0;
-}
-
 .message-bubble {
   max-width: 80%;
   padding: 10px 14px;
@@ -414,14 +289,13 @@ watch(messages, async () => {
 }
 
 .message-ai .message-bubble {
-  background: rgba(51, 65, 85, 0.5);
-  color: #cbd5e1;
+  background: var(--el-fill-color-light);
   border-bottom-left-radius: 4px;
 }
 
 .message-user .message-bubble {
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
-  color: #fff;
+  background: var(--el-color-primary);
+  color: var(--el-color-white);
   border-bottom-right-radius: 4px;
 }
 
@@ -443,48 +317,15 @@ watch(messages, async () => {
   align-items: flex-end;
   gap: 10px;
   padding: 12px 16px;
-  border-top: 1px solid rgba(99, 102, 241, 0.15);
+  border-top: 1px solid var(--el-border-color-light);
 }
 
 .chat-input {
   flex: 1;
 }
 
-.chat-input :deep(.el-textarea__inner) {
-  background: rgba(51, 65, 85, 0.4);
-  border: 1px solid rgba(99, 102, 241, 0.2);
-  color: #e2e8f0;
-  border-radius: 12px;
-  padding: 10px 14px;
-  font-size: 13px;
-  resize: none;
-  transition: border-color 0.2s;
-}
-
-.chat-input :deep(.el-textarea__inner:focus) {
-  border-color: #6366f1;
-  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
-}
-
-.chat-input :deep(.el-textarea__inner::placeholder) {
-  color: #64748b;
-}
-
 .send-btn {
   flex-shrink: 0;
-  width: 40px;
-  height: 40px;
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
-  border: none;
-  transition: all 0.2s;
-}
-
-.send-btn:hover:not(:disabled) {
-  transform: scale(1.05);
-}
-
-.send-btn:disabled {
-  background: rgba(51, 65, 85, 0.4);
 }
 
 .chat-slide-enter-active,

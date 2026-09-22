@@ -22,7 +22,7 @@ const {
 </script>
 
 <template>
-  <section class="campaign-panel">
+  <el-card class="campaign-panel" shadow="always">
     <header class="campaign-header">
       <div>
         <div class="campaign-eyebrow">Multi-model</div>
@@ -65,7 +65,7 @@ const {
                 ? 'warning'
                 : 'primary'
         "
-        effect="dark"
+        effect="light"
         size="small"
       >
         {{ campaign?.status || '加载中' }}
@@ -140,7 +140,7 @@ const {
         </button>
       </section>
     </div>
-  </section>
+  </el-card>
 </template>
 
 <style scoped>
@@ -152,13 +152,6 @@ const {
   z-index: 34;
   width: min(390px, calc(100vw - 48px));
   overflow-y: auto;
-  padding: 18px;
-  color: #e2e8f0;
-  background: rgba(15, 23, 42, 0.94);
-  border: 1px solid rgba(99, 102, 241, 0.24);
-  border-radius: 16px;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(22px) saturate(150%);
 }
 
 .campaign-header,
@@ -183,7 +176,7 @@ const {
 }
 
 .campaign-eyebrow {
-  color: #818cf8;
+  color: var(--el-color-primary);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 1px;
@@ -194,7 +187,6 @@ const {
 .candidate-summary,
 .run-item span,
 .candidate-card span {
-  color: #94a3b8;
   font-size: 12px;
 }
 
@@ -207,7 +199,6 @@ const {
   align-items: center;
   gap: 10px;
   min-height: 80px;
-  color: #94a3b8;
   font-size: 13px;
 }
 
@@ -226,7 +217,7 @@ const {
   display: grid;
   gap: 7px;
   padding: 10px 12px;
-  background: rgba(51, 65, 85, 0.38);
+  background: var(--el-fill-color-light);
   border-radius: 10px;
 }
 
@@ -236,7 +227,6 @@ const {
 
 .candidate-group h4 {
   margin: 6px 0 0;
-  color: #cbd5e1;
   font-size: 13px;
 }
 
@@ -244,16 +234,15 @@ const {
   width: 100%;
   gap: 10px;
   padding: 10px 12px;
-  color: inherit;
   text-align: left;
-  background: rgba(51, 65, 85, 0.42);
-  border: 1px solid rgba(99, 102, 241, 0.16);
+  background: var(--el-fill-color-light);
+  border: 1px solid var(--el-border-color-light);
   border-radius: 10px;
   cursor: pointer;
 }
 
 .candidate-card:hover {
-  border-color: rgba(129, 140, 248, 0.55);
+  border-color: var(--el-color-primary-light-5);
 }
 
 .candidate-card > div {

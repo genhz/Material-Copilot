@@ -78,12 +78,15 @@ const elementsList = computed(() => {
 </script>
 
 <template>
-  <div class="material-panel" :class="{ 'panel-visible': hasData }">
-    <!-- Header -->
-    <div class="panel-header">
+  <el-card
+    class="material-panel"
+    :class="{ 'panel-visible': hasData }"
+    shadow="always"
+  >
+    <template #header>
       <div class="header-title">
-        <span class="header-icon">🧊</span>
-        <span class="header-text">晶体结构数据</span>
+        <span>🧊</span>
+        <span>晶体结构数据</span>
       </div>
       <el-button
         v-if="hasData"
@@ -92,7 +95,7 @@ const elementsList = computed(() => {
         class="close-btn"
         @click="emit('close')"
       />
-    </div>
+    </template>
 
     <!-- Content -->
     <div v-if="isLoading" class="panel-loading">
@@ -176,7 +179,7 @@ const elementsList = computed(() => {
     <div v-else class="panel-empty">
       <el-empty description="搜索材料以查看详情" :image-size="80" />
     </div>
-  </div>
+  </el-card>
 </template>
 
 <script lang="ts">
@@ -191,53 +194,34 @@ export default { components: { Close, Loading } }
   left: 0;
   width: 360px;
   height: 100vh;
-  background: rgba(15, 23, 42, 0.85);
-  backdrop-filter: blur(20px) saturate(150%);
-  -webkit-backdrop-filter: blur(20px) saturate(150%);
-  border-right: 1px solid rgba(99, 102, 241, 0.2);
   z-index: 20;
-  display: flex;
-  flex-direction: column;
   transform: translateX(-100%);
   transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 4px 0 24px rgba(0, 0, 0, 0.3);
+}
+
+.material-panel :deep(.el-card__header) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.material-panel :deep(.el-card__body) {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .panel-visible {
   transform: translateX(0);
 }
 
-.panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 20px 20px 16px;
-  border-bottom: 1px solid rgba(99, 102, 241, 0.15);
-}
-
 .header-title {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.header-icon {
-  font-size: 20px;
-}
-
-.header-text {
-  font-size: 16px;
   font-weight: 600;
-  color: #e2e8f0;
-  letter-spacing: 0.5px;
-}
-
-.close-btn {
-  color: #94a3b8;
-}
-
-.close-btn:hover {
-  color: #f1f5f9;
 }
 
 .panel-loading {
@@ -247,7 +231,6 @@ export default { components: { Close, Loading } }
   align-items: center;
   justify-content: center;
   gap: 12px;
-  color: #94a3b8;
 }
 
 .loading-text {
@@ -260,15 +243,6 @@ export default { components: { Close, Loading } }
   padding: 16px 20px;
 }
 
-.panel-content::-webkit-scrollbar {
-  width: 4px;
-}
-
-.panel-content::-webkit-scrollbar-thumb {
-  background: rgba(99, 102, 241, 0.3);
-  border-radius: 4px;
-}
-
 .section {
   margin-bottom: 20px;
 }
@@ -276,7 +250,7 @@ export default { components: { Close, Loading } }
 .section-title {
   font-size: 12px;
   font-weight: 600;
-  color: #818cf8;
+  color: var(--el-color-primary);
   text-transform: uppercase;
   letter-spacing: 1px;
   margin-bottom: 12px;
@@ -287,10 +261,6 @@ export default { components: { Close, Loading } }
   font-weight: 700;
   padding: 16px 0 8px;
   text-align: center;
-  background: linear-gradient(135deg, #818cf8, #c084fc);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
 }
 
 .formula-id {
@@ -298,23 +268,10 @@ export default { components: { Close, Loading } }
   margin-bottom: 8px;
 }
 
-.descriptions {
-  --el-descriptions-item-label-background: rgba(99, 102, 241, 0.1);
-  --el-descriptions-item-bordered-label-background: rgba(99, 102, 241, 0.1);
-  --el-descriptions-border-color: rgba(99, 102, 241, 0.15);
-  --el-descriptions-text-color: #cbd5e1;
-}
-
 .elements-list {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-}
-
-.element-tag {
-  background: rgba(99, 102, 241, 0.15);
-  border-color: rgba(99, 102, 241, 0.25);
-  color: #a5b4fc;
 }
 
 .panel-empty {

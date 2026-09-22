@@ -75,7 +75,7 @@ const updateCharts = () => {
         type: 'category',
         data: ['带隙 (eV)', '形成能 (eV/atom)'],
         axisLabel: { color: '#64748b', fontSize: 11 },
-        axisLine: { lineStyle: { color: '#e2e8f0' } },
+        axisLine: { lineStyle: { color: '#909399' } },
       },
       yAxis: {
         type: 'value',

@@ -22,11 +22,11 @@
 - 🧪 **MatterGen 模型**：九种预训练模型统一路由
 - 🚀 **多模型探索**：单模型生成和多模型顺序 Campaign
 - 📡 **实时进度**：WebSocket 推送与常驻候选列表
-- 🔮 **3D 可视化**：CIF 晶体结构渲染
+- 🔮 **3D 可视化**：Mol* 晶体结构与超胞渲染
 
 ## 🛠️ 技术栈
 
-Vue 3、TypeScript、Vite、Element Plus、FastAPI、LangChain、PyTorch、MatterGen、MatterSim、3Dmol.js。
+Vue 3、TypeScript、Vite、Element Plus、Mol*、FastAPI、LangChain、PyTorch、MatterGen、MatterSim。
 
 ## 🚀 快速开始
 

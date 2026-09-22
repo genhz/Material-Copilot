@@ -2,191 +2,30 @@
 @tailwind components;
 @tailwind utilities;
 
-/* 全局样式 - 沉浸式暗色主题 */
-html, body {
-  margin: 0;
-  padding: 0;
+html,
+body,
+#app {
   width: 100%;
   height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
   overflow: hidden;
-  background: #0f172a;
+  background: var(--el-bg-color-page);
   font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-#app {
-  width: 100%;
-  height: 100%;
-}
-
-/* 滚动条美化 */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
-::-webkit-scrollbar-track {
-  background: transparent;
-}
+
 ::-webkit-scrollbar-thumb {
-  background: rgba(99, 102, 241, 0.3);
+  background: var(--el-border-color);
   border-radius: 3px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(99, 102, 241, 0.5);
-}
-
-/* Element Plus 主题覆盖 - 暗色适配 */
-:root {
-  --el-color-primary: #6366f1;
-  --el-color-primary-light-3: #818cf8;
-  --el-color-primary-light-5: #a5b4fc;
-  --el-color-primary-light-7: #c7d2fe;
-  --el-color-primary-light-9: #e0e7ff;
-  --el-color-primary-dark-2: #4f46e5;
-
-  /* 暗色主题变量 */
-  --el-bg-color: rgba(15, 23, 42, 0.9);
-  --el-bg-color-page: #0f172a;
-  --el-text-color-primary: #e2e8f0;
-  --el-text-color-regular: #cbd5e1;
-  --el-text-color-secondary: #94a3b8;
-  --el-border-color: rgba(99, 102, 241, 0.2);
-  --el-border-color-light: rgba(99, 102, 241, 0.15);
-}
-
-/* Element Plus 组件暗色适配 */
-.el-alert--error {
-  --el-alert-error-bg-color: rgba(239, 68, 68, 0.15);
-  --el-alert-error-border-color: rgba(239, 68, 68, 0.3);
-}
-
-.el-button--primary {
-  --el-button-primary-bg-color: linear-gradient(135deg, #6366f1, #8b5cf6);
-  --el-button-primary-border-color: transparent;
-  --el-button-primary-text-color: #ffffff;
-}
-
-.el-button--primary.is-circle,
-.el-button--primary[round] {
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
-}
-
-/* Input 暗色主题 */
-.el-input__wrapper {
-  background-color: rgba(51, 65, 85, 0.4) !important;
-  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.2) inset !important;
-}
-
-.el-input__wrapper:hover {
-  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.4) inset !important;
-}
-
-.el-input__wrapper.is-focus {
-  box-shadow: 0 0 0 1px #6366f1 inset, 0 0 0 2px rgba(99, 102, 241, 0.15) !important;
-}
-
-.el-input__inner {
-  color: #e2e8f0 !important;
-}
-
-.el-input__inner::placeholder {
-  color: #64748b !important;
-}
-
-/* Tag 暗色主题 */
-.el-tag--primary {
-  --el-tag-bg-color: rgba(99, 102, 241, 0.15);
-  --el-tag-border-color: rgba(99, 102, 241, 0.3);
-  --el-tag-text-color: #a5b4fc;
-}
-
-.el-tag--success {
-  --el-tag-bg-color: rgba(34, 197, 94, 0.15);
-  --el-tag-border-color: rgba(34, 197, 94, 0.3);
-  --el-tag-text-color: #4ade80;
-}
-
-.el-tag--warning {
-  --el-tag-bg-color: rgba(251, 191, 36, 0.15);
-  --el-tag-border-color: rgba(251, 191, 36, 0.3);
-  --el-tag-text-color: #fbbf24;
-}
-
-.el-tag--danger {
-  --el-tag-bg-color: rgba(239, 68, 68, 0.15);
-  --el-tag-border-color: rgba(239, 68, 68, 0.3);
-  --el-tag-text-color: #f87171;
-}
-
-/* Descriptions 暗色主题 */
-.el-descriptions--bordered {
-  --el-descriptions-header-bg-color: rgba(99, 102, 241, 0.1);
-  --el-descriptions-item-bordered-label-background: rgba(99, 102, 241, 0.1);
-}
-
-.el-descriptions__label {
-  color: #94a3b8 !important;
-  background-color: rgba(51, 65, 85, 0.3) !important;
-}
-
-.el-descriptions__content {
-  color: #e2e8f0 !important;
-  background-color: rgba(15, 23, 42, 0.5) !important;
-}
-
-/* Empty 暗色主题 */
-.el-empty__description {
-  color: #64748b !important;
-}
-
-/* Card 暗色主题 (用于聊天面板等) */
-.el-card {
-  background-color: transparent !important;
-  border: none !important;
-}
-
-/* Drawer 暗色主题 */
-.el-drawer {
-  background-color: rgba(15, 23, 42, 0.95) !important;
-  border-right: 1px solid rgba(99, 102, 241, 0.2) !important;
-}
-
-.el-drawer__header {
-  border-bottom-color: rgba(99, 102, 241, 0.15) !important;
-  color: #e2e8f0 !important;
-}
-
-.el-drawer__title {
-  color: #e2e8f0 !important;
-}
-
-.el-drawer__body {
-  color: #cbd5e1 !important;
-}
-
-/* Popover 暗色主题 */
-.el-popover {
-  background-color: rgba(15, 23, 42, 0.95) !important;
-  border: 1px solid rgba(99, 102, 241, 0.2) !important;
-  color: #e2e8f0 !important;
-}
-
-/* Tooltip 暗色主题 */
-.el-tooltip__popper {
-  background-color: rgba(15, 23, 42, 0.95) !important;
-  color: #e2e8f0 !important;
-}
-
-/* Loading 暗色主题 */
-.el-loading-mask {
-  background-color: rgba(15, 23, 42, 0.7) !important;
-}
-
-.el-loading-spinner .path {
-  stroke: #6366f1 !important;
-}
-
-.el-loading-spinner .el-loading-text {
-  color: #94a3b8 !important;
 }

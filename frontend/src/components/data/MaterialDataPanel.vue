@@ -43,7 +43,7 @@ const getEnergyLabel = (v: number | null): string => {
   <div v-if="material" class="space-y-4">
     <!-- 标题区 -->
     <div class="flex items-center gap-3 pb-3 border-b border-gray-200">
-      <el-tag type="primary" size="large" effect="dark">
+      <el-tag type="primary" size="large" effect="plain">
         {{ material.formula }}
       </el-tag>
       <el-tag type="info" size="small" effect="plain">
