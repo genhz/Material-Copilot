@@ -91,6 +91,9 @@ export interface GenerationRequest {
   conditions: Record<string, number | string>
   target_magnetic_density?: number | null
   hhi_score?: number | null
+  required_elements?: string[]
+  allowed_elements?: string[]
+  excluded_elements?: string[]
   num_candidates?: number
   guidance_scale?: number
   seed?: number | null

@@ -8,6 +8,7 @@ from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from agent_workflow.service import get_agent_workflow_service
 from generation.exceptions import GenerationError
 from generation.manager import get_generation_manager
 
@@ -55,12 +56,26 @@ async def _forward_events(
         manager.unsubscribe(channel, resource_id, queue)
 
 
+async def _forward_agent_events(
+    session_id: str,
+    queue: asyncio.Queue,
+    outbound: asyncio.Queue[dict[str, Any]],
+) -> None:
+    service = get_agent_workflow_service()
+    try:
+        while True:
+            await outbound.put(await queue.get())
+    finally:
+        service.unsubscribe(session_id, queue)
+
+
 @router.websocket("/api/ws")
 async def realtime_websocket(websocket: WebSocket) -> None:
     """Accept channel subscriptions over one multiplexed WebSocket."""
 
     await websocket.accept()
     manager = get_generation_manager()
+    agent_workflow = get_agent_workflow_service()
     outbound: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
     subscriptions: dict[
         tuple[str, str],
@@ -92,6 +107,65 @@ async def realtime_websocket(websocket: WebSocket) -> None:
                 )
                 continue
 
+            if action and action.startswith("agent."):
+                session_id = str(message.get("session_id") or "")
+                if not session_id:
+                    await outbound.put(
+                        {
+                            "type": "error",
+                            "code": "SESSION_REQUIRED",
+                            "message": "Agent 操作需要 session_id。",
+                            "request_id": request_id,
+                        }
+                    )
+                    continue
+
+                if action == "agent.message":
+                    await agent_workflow.handle_message(
+                        session_id,
+                        str(message.get("message") or ""),
+                    )
+                elif action == "agent.revise":
+                    await agent_workflow.revise_plan(
+                        session_id,
+                        str(message.get("plan_id") or ""),
+                        int(message.get("revision") or 0),
+                        str(message.get("message") or ""),
+                    )
+                elif action == "agent.confirm":
+                    await agent_workflow.confirm_plan(
+                        session_id,
+                        str(message.get("plan_id") or ""),
+                        int(message.get("revision") or 0),
+                    )
+                elif action == "agent.cancel":
+                    await agent_workflow.cancel_workflow(session_id)
+                elif action == "agent.clear":
+                    await agent_workflow.clear_session(session_id)
+                elif action == "agent.snapshot":
+                    await outbound.put(
+                        {
+                            "type": "agent.snapshot",
+                            "channel": "agent.session",
+                            "resource_id": session_id,
+                            "request_id": request_id,
+                            "snapshot": agent_workflow.snapshot(
+                                session_id,
+                                int(message.get("last_sequence") or 0),
+                            ),
+                        }
+                    )
+                else:
+                    await outbound.put(
+                        {
+                            "type": "error",
+                            "code": "INVALID_AGENT_ACTION",
+                            "message": f"不支持的 Agent 操作：{action}",
+                            "request_id": request_id,
+                        }
+                    )
+                continue
+
             channel = message.get("channel")
             resource_id = message.get("resource_id")
 
@@ -102,7 +176,10 @@ async def realtime_websocket(websocket: WebSocket) -> None:
                     queue, task = subscription
                     task.cancel()
                     await asyncio.gather(task, return_exceptions=True)
-                    manager.unsubscribe(key[0], key[1], queue)
+                    if key[0] == "agent.session":
+                        agent_workflow.unsubscribe(key[1], queue)
+                    else:
+                        manager.unsubscribe(key[0], key[1], queue)
                 await outbound.put(
                     {
                         "type": "unsubscribed",
@@ -127,6 +204,7 @@ async def realtime_websocket(websocket: WebSocket) -> None:
             if channel not in {
                 "generation.job",
                 "generation.campaign",
+                "agent.session",
             } or not resource_id:
                 await outbound.put(
                     {
@@ -138,30 +216,39 @@ async def realtime_websocket(websocket: WebSocket) -> None:
                 )
                 continue
 
-            try:
-                if channel == "generation.job":
-                    resource = await manager.get_job(str(resource_id))
-                    resource_key = "job"
-                else:
-                    resource = await manager.get_campaign(str(resource_id))
-                    resource_key = "campaign"
-            except GenerationError as exc:
-                await outbound.put(
-                    {
-                        "type": "error",
-                        "code": exc.code,
-                        "message": exc.message,
-                        "request_id": request_id,
-                    }
-                )
-                continue
+            resource = None
+            resource_key = ""
+            if channel != "agent.session":
+                try:
+                    if channel == "generation.job":
+                        resource = await manager.get_job(str(resource_id))
+                        resource_key = "job"
+                    else:
+                        resource = await manager.get_campaign(str(resource_id))
+                        resource_key = "campaign"
+                except GenerationError as exc:
+                    await outbound.put(
+                        {
+                            "type": "error",
+                            "code": exc.code,
+                            "message": exc.message,
+                            "request_id": request_id,
+                        }
+                    )
+                    continue
 
             key = (str(channel), str(resource_id))
             if key not in subscriptions:
-                queue = manager.subscribe(key[0], key[1])
-                task = asyncio.create_task(
-                    _forward_events(key[0], key[1], queue, outbound)
-                )
+                if channel == "agent.session":
+                    queue = agent_workflow.subscribe(key[1])
+                    task = asyncio.create_task(
+                        _forward_agent_events(key[1], queue, outbound)
+                    )
+                else:
+                    queue = manager.subscribe(key[0], key[1])
+                    task = asyncio.create_task(
+                        _forward_events(key[0], key[1], queue, outbound)
+                    )
                 subscriptions[key] = (queue, task)
 
             await outbound.put(
@@ -172,6 +259,18 @@ async def realtime_websocket(websocket: WebSocket) -> None:
                     "request_id": request_id,
                 }
             )
+            if channel == "agent.session":
+                await outbound.put(
+                    {
+                        "type": "agent.snapshot",
+                        "channel": channel,
+                        "resource_id": resource_id,
+                        "snapshot": agent_workflow.snapshot(str(resource_id)),
+                    }
+                )
+                continue
+
+            assert resource is not None
             await outbound.put(
                 {
                     "type": "snapshot",
@@ -188,7 +287,10 @@ async def realtime_websocket(websocket: WebSocket) -> None:
         await asyncio.gather(sender, return_exceptions=True)
         for (channel, resource_id), (queue, task) in subscriptions.items():
             task.cancel()
-            manager.unsubscribe(channel, resource_id, queue)
+            if channel == "agent.session":
+                agent_workflow.unsubscribe(resource_id, queue)
+            else:
+                manager.unsubscribe(channel, resource_id, queue)
         await asyncio.gather(
             *(task for _, task in subscriptions.values()),
             return_exceptions=True,

@@ -36,6 +36,9 @@ class GenerationRequest(BaseModel):
         default=None, gt=0, le=1
     )
     hhi_score: Optional[float] = Field(default=None, ge=0, le=1)
+    required_elements: list[str] = Field(default_factory=list)
+    allowed_elements: list[str] = Field(default_factory=list)
+    excluded_elements: list[str] = Field(default_factory=list)
     num_candidates: int = Field(default=2, ge=1, le=16)
     guidance_scale: Optional[float] = Field(default=None, ge=0, le=20)
     seed: Optional[int] = None

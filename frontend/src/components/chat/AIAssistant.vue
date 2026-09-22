@@ -1,9 +1,14 @@
 <script setup lang="ts">
-import { ref, nextTick, watch } from 'vue'
-import { ChatDotRound, Close, Position, Loading } from '@element-plus/icons-vue'
+import { nextTick, ref, watch } from 'vue'
+import {
+  ChatDotRound,
+  Close,
+  Position,
+} from '@element-plus/icons-vue'
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
-import { useAIChat } from '../../composables/useAIChat'
+import ExecutionPlanPanel from '../agent/ExecutionPlanPanel.vue'
+import { useAgentSession } from '../../composables/useAgentSession'
 import type { MaterialData } from '../../types/material'
 
 const emit = defineEmits<{
@@ -12,10 +17,26 @@ const emit = defineEmits<{
   campaignStarted: [campaignId: string]
 }>()
 
-const { messages, isChatting, sendMessage, clearChat } = useAIChat()
-const chatVisible = ref(false)
+const {
+  messages,
+  currentPlan,
+  workflow,
+  isConnected,
+  isPlanning,
+  primaryJobId,
+  lastResult,
+  sendMessage,
+  confirmPlan,
+  revisePlan,
+  cancelWorkflow,
+  clearSession,
+} = useAgentSession()
+
+const workspaceVisible = ref(false)
 const inputMessage = ref('')
 const chatContainerRef = ref<HTMLElement | null>(null)
+let handledJobId: string | null = null
+let handledResult: unknown = null
 
 const renderMarkdown = (content: string) => {
   const html = marked.parse(content, {
@@ -60,45 +81,28 @@ const suggestions = [
   { label: '查看 Fe3O4', text: '查看 Fe3O4 的晶体结构' },
   {
     label: '设计高磁密度材料',
-    text: '帮我设计两个高磁密度磁性材料候选',
+    text: '帮我设计高磁密度磁性材料候选',
   },
   {
-    label: '探索新材料',
-    text: '给我一些还没被材料库收录的新型磁性材料候选',
+    label: '探索钕铁磁体',
+    text: '请探索钕铁合金磁性性能较优的晶体结构',
   },
   {
-    label: '多模型全面探索',
-    text: '使用所有模型全面探索新型磁性材料',
+    label: '无稀土磁体',
+    text: '设计不含稀土元素的高磁密度磁体候选',
   },
 ]
 
-const handleSend = async () => {
+function handleSend() {
   const text = inputMessage.value.trim()
-  if (!text || isChatting.value) return
+  if (!text || isPlanning.value) return
   inputMessage.value = ''
-
-  const result = await sendMessage(text)
-  if (result.action === 'campaign' && result.campaignId) {
-    emit('campaignStarted', result.campaignId)
-  } else if (result.action === 'generate' && result.jobId) {
-    emit('generationStarted', result.jobId)
-  } else if (result.materialData) {
-    emit(
-      'materialFound',
-      result.materialData,
-      result.action === 'render' ? 'render' : 'chat'
-    )
-  }
+  sendMessage(text)
 }
 
-const handleSuggestion = async (text: string) => {
-  inputMessage.value = text
-  await handleSend()
-}
-
-const handleKeydown = (e: KeyboardEvent) => {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault()
+function handleKeydown(event: KeyboardEvent) {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault()
     handleSend()
   }
 }
@@ -109,221 +113,267 @@ watch(messages, async () => {
     chatContainerRef.value.scrollTop = chatContainerRef.value.scrollHeight
   }
 }, { deep: true })
+
+watch(primaryJobId, (jobId) => {
+  if (!jobId || jobId === handledJobId) return
+  handledJobId = jobId
+  emit('generationStarted', jobId)
+})
+
+watch(lastResult, (result) => {
+  if (!result || result === handledResult) return
+  handledResult = result
+  if (result.campaign_id) {
+    emit('campaignStarted', result.campaign_id)
+  } else if (result.material_data) {
+    emit(
+      'materialFound',
+      result.material_data,
+      result.action === 'render' ? 'render' : 'chat'
+    )
+  }
+})
 </script>
 
 <template>
   <Teleport to="body">
-    <!-- Chat Panel -->
-    <Transition name="chat-slide">
-      <el-card
-        v-if="chatVisible"
-        class="chat-panel"
-        shadow="always"
-      >
-        <template #header>
-          <div class="chat-header-title">
+    <Transition name="workspace">
+      <section v-if="workspaceVisible" class="agent-workspace">
+        <header class="workspace-header">
+          <div class="workspace-title">
             <el-icon><ChatDotRound /></el-icon>
-            <span>AI 材料助手</span>
-          </div>
-          <div class="chat-header-actions">
-            <el-button
-              text
-              size="small"
-              class="clear-btn"
-              @click="clearChat"
-            >
-              清除
-            </el-button>
-            <el-button
-              text
-              size="small"
-              class="close-btn"
-              @click="chatVisible = false"
-            >
-              <el-icon :size="16"><Close /></el-icon>
-            </el-button>
-          </div>
-        </template>
-
-        <!-- Messages -->
-        <div ref="chatContainerRef" class="chat-messages">
-          <div v-if="messages.length === 0" class="chat-welcome">
-            <div class="welcome-icon">🤖</div>
-            <p class="welcome-title">你好，我是 AI 材料助手</p>
-            <p class="welcome-desc">输入材料化学式或提出问题</p>
-            <div class="welcome-suggestions">
-              <el-tag
-                v-for="suggestion in suggestions"
-                :key="suggestion.label"
-                effect="plain"
-                class="suggestion-chip"
-                @click="handleSuggestion(suggestion.text)"
-              >
-                {{ suggestion.label }}
-              </el-tag>
+            <div>
+              <strong>AI 材料工作区</strong>
+              <span>{{ isConnected ? '实时连接' : '正在重连' }}</span>
             </div>
           </div>
+          <div class="workspace-actions">
+            <el-button text size="small" @click="clearSession">
+              清除会话
+            </el-button>
+            <el-button
+              text
+              circle
+              size="small"
+              @click="workspaceVisible = false"
+            >
+              <el-icon><Close /></el-icon>
+            </el-button>
+          </div>
+        </header>
 
-          <div
-            v-for="msg in messages"
-            :key="msg.id"
-            :class="['message', msg.role === 'user' ? 'message-user' : 'message-ai']"
-          >
-            <el-avatar v-if="msg.role !== 'user'" :size="32">
-              🤖
-            </el-avatar>
-            <div class="message-bubble">
-              <p
-                v-if="msg.role === 'user'"
-                class="message-content message-plain"
-              >
-                {{ msg.content }}
-              </p>
+        <div class="workspace-body">
+          <section class="conversation-panel">
+            <div ref="chatContainerRef" class="chat-messages">
+              <div v-if="messages.length === 0" class="chat-welcome">
+                <div class="welcome-icon">🤖</div>
+                <h2>先讨论方案，再开始生成</h2>
+                <p>
+                  我会先解析元素和目标，给出执行计划。只有你确认后，任务才会执行。
+                </p>
+                <div class="welcome-suggestions">
+                  <el-tag
+                    v-for="suggestion in suggestions"
+                    :key="suggestion.label"
+                    effect="plain"
+                    class="suggestion-chip"
+                    @click="sendMessage(suggestion.text)"
+                  >
+                    {{ suggestion.label }}
+                  </el-tag>
+                </div>
+              </div>
+
               <div
-                v-else
-                class="message-content message-markdown"
-                v-html="renderMarkdown(msg.content)"
+                v-for="message in messages"
+                :key="message.id"
+                class="message"
+                :class="
+                  message.role === 'user'
+                    ? 'message-user'
+                    : 'message-assistant'
+                "
+              >
+                <el-avatar v-if="message.role === 'assistant'" :size="30">
+                  🤖
+                </el-avatar>
+                <div class="message-bubble">
+                  <p
+                    v-if="message.role === 'user'"
+                    class="message-content message-plain"
+                  >
+                    {{ message.content }}
+                  </p>
+                  <div
+                    v-else
+                    class="message-content message-markdown"
+                    v-html="renderMarkdown(message.content)"
+                  />
+                  <span v-if="message.streaming" class="stream-cursor" />
+                </div>
+              </div>
+            </div>
+
+            <div class="chat-input-area">
+              <el-input
+                v-model="inputMessage"
+                type="textarea"
+                resize="none"
+                :autosize="{ minRows: 2, maxRows: 5 }"
+                placeholder="描述材料目标，例如：探索 Nd-Fe-B 高磁密度候选"
+                @keydown="handleKeydown"
+              />
+              <el-button
+                type="primary"
+                :icon="Position"
+                :disabled="isPlanning || !inputMessage.trim()"
+                circle
+                @click="handleSend"
               />
             </div>
-          </div>
+          </section>
 
-          <div v-if="isChatting" class="message message-ai">
-            <el-avatar :size="32">🤖</el-avatar>
-            <div class="message-bubble message-bubble-loading">
-              <el-icon class="is-loading" :size="18" color="#818cf8">
-                <Loading />
-              </el-icon>
-            </div>
-          </div>
+          <aside class="plan-pane">
+            <ExecutionPlanPanel
+              :plan="currentPlan"
+              :workflow="workflow"
+              :is-connected="isConnected"
+              @confirm="confirmPlan"
+              @revise="revisePlan"
+              @cancel="cancelWorkflow"
+            />
+          </aside>
         </div>
-
-        <!-- Input -->
-        <div class="chat-input-area">
-          <el-input
-            v-model="inputMessage"
-            placeholder="输入消息，按 Enter 发送..."
-            :autosize="{ minRows: 1, maxRows: 4 }"
-            type="textarea"
-            resize="none"
-            class="chat-input"
-            @keydown="handleKeydown"
-          />
-          <el-button
-            type="primary"
-            :icon="Position"
-            :disabled="isChatting || !inputMessage.trim()"
-            circle
-            class="send-btn"
-            @click="handleSend"
-          />
-        </div>
-      </el-card>
+      </section>
     </Transition>
 
-    <!-- Floating Action Button -->
-    <el-tooltip content="AI 助手" placement="left">
+    <el-tooltip
+      v-if="!workspaceVisible"
+      content="AI 助手"
+      placement="left"
+    >
       <el-button
         class="ai-fab"
         type="primary"
         circle
         size="large"
-        :icon="chatVisible ? Close : ChatDotRound"
-        @click="chatVisible = !chatVisible"
+        :icon="workspaceVisible ? Close : ChatDotRound"
+        @click="workspaceVisible = !workspaceVisible"
       />
     </el-tooltip>
   </Teleport>
 </template>
 
 <style scoped>
-.ai-fab {
+.agent-workspace {
   position: fixed;
-  bottom: 32px;
-  right: 32px;
-  z-index: 50;
-}
-
-.chat-panel {
-  position: fixed;
-  bottom: 100px;
-  right: 32px;
-  width: 400px;
-  height: 560px;
+  inset: 18px;
   z-index: 50;
   display: flex;
   flex-direction: column;
+  max-width: 1280px;
+  margin: auto;
   overflow: hidden;
+  color: var(--el-text-color-primary);
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color);
+  border-radius: 12px;
+  box-shadow: var(--el-box-shadow-dark);
 }
 
-.chat-panel :deep(.el-card__header) {
+.workspace-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  min-height: 58px;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--el-border-color-light);
 }
 
-.chat-panel :deep(.el-card__body) {
+.workspace-title,
+.workspace-actions {
   display: flex;
-  flex: 1;
+  align-items: center;
+}
+
+.workspace-title {
+  gap: 10px;
+}
+
+.workspace-title div {
+  display: flex;
   flex-direction: column;
-  min-height: 0;
-  padding: 0;
 }
 
-.chat-header-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 15px;
-  font-weight: 600;
+.workspace-title span {
+  margin-top: 2px;
+  color: var(--el-text-color-secondary);
+  font-size: 11px;
 }
 
-.chat-header-actions {
-  display: flex;
-  align-items: center;
+.workspace-actions {
   gap: 4px;
 }
 
-.chat-messages {
+.workspace-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 420px;
   flex: 1;
-  overflow-y: auto;
-  padding: 16px;
+  min-height: 0;
+}
+
+.conversation-panel {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.chat-messages {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+  padding: 24px;
+  overflow-y: auto;
 }
 
 .chat-welcome {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 24px 0;
+  max-width: 520px;
+  margin: auto;
+  text-align: center;
 }
 
 .welcome-icon {
-  font-size: 48px;
-  margin-bottom: 12px;
+  font-size: 52px;
 }
 
-.welcome-title {
-  font-size: 16px;
-  font-weight: 600;
-  margin-bottom: 4px;
+.chat-welcome h2 {
+  margin: 12px 0 8px;
+  font-size: 20px;
 }
 
-.welcome-desc {
-  font-size: 13px;
-  margin-bottom: 20px;
+.chat-welcome p {
+  margin: 0 0 20px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.7;
 }
 
 .welcome-suggestions {
   display: flex;
-  gap: 8px;
   flex-wrap: wrap;
+  gap: 8px;
   justify-content: center;
+}
+
+.suggestion-chip {
+  cursor: pointer;
 }
 
 .message {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   align-items: flex-start;
 }
 
@@ -332,35 +382,26 @@ watch(messages, async () => {
 }
 
 .message-bubble {
-  max-width: 80%;
-  padding: 10px 14px;
-  border-radius: 16px;
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-.message-ai .message-bubble {
+  max-width: min(78%, 760px);
+  padding: 11px 14px;
+  font-size: 14px;
+  line-height: 1.7;
   background: var(--el-fill-color-light);
-  border-bottom-left-radius: 4px;
+  border-radius: 12px;
 }
 
 .message-user .message-bubble {
-  background: var(--el-color-primary);
   color: var(--el-color-white);
-  border-bottom-right-radius: 4px;
+  background: var(--el-color-primary);
 }
 
 .message-content {
   margin: 0;
-  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .message-plain {
   white-space: pre-wrap;
-}
-
-.message-markdown {
-  white-space: normal;
 }
 
 .message-markdown :deep(> :first-child) {
@@ -372,82 +413,36 @@ watch(messages, async () => {
 }
 
 .message-markdown :deep(p) {
-  margin: 0 0 8px;
-}
-
-.message-markdown :deep(h1),
-.message-markdown :deep(h2),
-.message-markdown :deep(h3),
-.message-markdown :deep(h4) {
-  margin: 14px 0 8px;
-  line-height: 1.35;
-}
-
-.message-markdown :deep(h1) {
-  font-size: 18px;
-}
-
-.message-markdown :deep(h2) {
-  font-size: 16px;
-}
-
-.message-markdown :deep(h3),
-.message-markdown :deep(h4) {
-  font-size: 14px;
-}
-
-.message-markdown :deep(ul),
-.message-markdown :deep(ol) {
-  margin: 6px 0 8px;
-  padding-left: 20px;
-}
-
-.message-markdown :deep(li + li) {
-  margin-top: 4px;
-}
-
-.message-markdown :deep(blockquote) {
-  margin: 8px 0;
-  padding: 4px 10px;
-  color: var(--el-text-color-secondary);
-  border-left: 3px solid var(--el-border-color);
-}
-
-.message-markdown :deep(code) {
-  padding: 1px 4px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12px;
-  background: var(--el-fill-color-darker);
-  border-radius: 4px;
+  margin: 0 0 9px;
 }
 
 .message-markdown :deep(pre) {
-  margin: 8px 0;
-  padding: 10px;
+  padding: 10px 12px;
   overflow-x: auto;
   background: var(--el-fill-color-darker);
   border-radius: 6px;
 }
 
+.message-markdown :deep(code) {
+  padding: 1px 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--el-fill-color-darker);
+  border-radius: 4px;
+}
+
 .message-markdown :deep(pre code) {
   padding: 0;
-  white-space: pre;
   background: transparent;
 }
 
-.message-markdown :deep(a) {
-  color: var(--el-color-primary);
-  text-decoration: none;
-}
-
-.message-markdown :deep(a:hover) {
-  text-decoration: underline;
+.message-markdown :deep(ul),
+.message-markdown :deep(ol) {
+  padding-left: 22px;
 }
 
 .message-markdown :deep(table) {
   display: block;
-  width: 100%;
-  margin: 8px 0;
+  max-width: 100%;
   overflow-x: auto;
   border-collapse: collapse;
 }
@@ -455,56 +450,77 @@ watch(messages, async () => {
 .message-markdown :deep(th),
 .message-markdown :deep(td) {
   padding: 5px 8px;
-  text-align: left;
   border: 1px solid var(--el-border-color);
 }
 
-.message-markdown :deep(th) {
-  font-weight: 600;
-  background: var(--el-fill-color-light);
+.stream-cursor {
+  display: inline-block;
+  width: 7px;
+  height: 15px;
+  margin-left: 4px;
+  vertical-align: text-bottom;
+  background: var(--el-color-primary);
+  animation: cursor-blink 0.8s steps(1) infinite;
 }
 
-.message-markdown :deep(hr) {
-  margin: 12px 0;
-  border: 0;
-  border-top: 1px solid var(--el-border-color-light);
-}
-
-.message-bubble-loading {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 44px;
+@keyframes cursor-blink {
+  50% {
+    opacity: 0;
+  }
 }
 
 .chat-input-area {
   display: flex;
   align-items: flex-end;
   gap: 10px;
-  padding: 12px 16px;
+  padding: 14px 18px;
   border-top: 1px solid var(--el-border-color-light);
 }
 
-.chat-input {
-  flex: 1;
+.plan-pane {
+  min-height: 0;
+  background: var(--el-bg-color-page);
+  border-left: 1px solid var(--el-border-color-light);
 }
 
-.send-btn {
-  flex-shrink: 0;
+.ai-fab {
+  position: fixed;
+  right: 32px;
+  bottom: 32px;
+  z-index: 55;
 }
 
-.chat-slide-enter-active,
-.chat-slide-leave-active {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+.workspace-enter-active,
+.workspace-leave-active {
+  transition: opacity 0.25s, transform 0.25s;
 }
 
-.chat-slide-enter-from {
+.workspace-enter-from,
+.workspace-leave-to {
   opacity: 0;
-  transform: translateY(20px) scale(0.95);
+  transform: translateY(18px) scale(0.98);
 }
 
-.chat-slide-leave-to {
-  opacity: 0;
-  transform: translateY(20px) scale(0.95);
+@media (max-width: 900px) {
+  .agent-workspace {
+    inset: 0;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .workspace-body {
+    grid-template-columns: 1fr;
+    overflow-y: auto;
+  }
+
+  .conversation-panel,
+  .plan-pane {
+    min-height: 60vh;
+  }
+
+  .plan-pane {
+    border-top: 1px solid var(--el-border-color-light);
+    border-left: 0;
+  }
 }
 </style>

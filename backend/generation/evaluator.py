@@ -43,6 +43,26 @@ def _spacegroup_info(structure: Structure) -> tuple[str | None, int | None, str 
         return None, None, None
 
 
+def _validate_composition(
+    elements: set[str],
+    request: GenerationRequest,
+) -> str | None:
+    required = set(request.required_elements)
+    allowed = set(request.allowed_elements)
+    excluded = set(request.excluded_elements)
+
+    missing = required - elements
+    if missing:
+        return f"缺少必需元素：{sorted(missing)}"
+    forbidden = excluded & elements
+    if forbidden:
+        return f"包含禁止元素：{sorted(forbidden)}"
+    outside_allowed = elements - allowed
+    if allowed and outside_allowed:
+        return f"包含允许范围外元素：{sorted(outside_allowed)}"
+    return None
+
+
 def _candidate_from_structure(
     structure: Structure,
     job_id: str,
@@ -56,6 +76,11 @@ def _candidate_from_structure(
 
     if len(structure) < 1:
         raise ValueError("结构不包含原子")
+
+    elements = {element.symbol for element in structure.composition.elements}
+    composition_error = _validate_composition(elements, request)
+    if composition_error:
+        raise ValueError(composition_error)
 
     spacegroup_symbol, spacegroup_number, crystal_system = _spacegroup_info(structure)
     candidate_id = f"mg-{job_id}-{index:03d}"

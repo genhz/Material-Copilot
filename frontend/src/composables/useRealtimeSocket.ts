@@ -2,9 +2,17 @@ import { ref } from 'vue'
 
 export interface RealtimeMessage {
   type: string
+  sequence?: number
   channel?: string
   resource_id?: string
   job?: unknown
+  campaign?: unknown
+  plan?: unknown
+  workflow?: unknown
+  step?: unknown
+  snapshot?: unknown
+  content?: string
+  progress?: number
   code?: string
   message?: string
   request_id?: string
