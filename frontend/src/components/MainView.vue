@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { Grid, TrendCharts } from '@element-plus/icons-vue'
+import { Grid } from '@element-plus/icons-vue'
 import SearchBar from './crystal/SearchBar.vue'
 import CrystalViewer from './crystal/CrystalViewer.vue'
 import MaterialPanel from './data/MaterialPanel.vue'
@@ -20,7 +19,6 @@ const {
   setMaterial,
 } = useMaterialSearch()
 
-const showCharts = ref(false)
 const {
   jobId: generationJobId,
   candidates: generatedCandidates,
@@ -157,51 +155,6 @@ const handleGeneratedCandidate = (candidate: GeneratedCandidate) => {
           @close="handleClosePanel"
         />
 
-        <!-- Charts Panel - Right Side -->
-        <div class="charts-panel">
-          <div class="charts-toggle">
-            <el-button
-              :type="showCharts ? 'primary' : 'default'"
-              size="small"
-              @click="showCharts = !showCharts"
-            >
-              {{ showCharts ? '隐藏图表' : '显示图表' }}
-            </el-button>
-          </div>
-          <Transition name="slide-up">
-            <el-card v-if="showCharts" shadow="always" class="charts-card">
-              <template #header>
-                <el-space>
-                  <el-icon><TrendCharts /></el-icon>
-                  <span>物性分析图表</span>
-                </el-space>
-              </template>
-              <el-descriptions :column="1" border>
-                <el-descriptions-item label="带隙">
-                  {{
-                    currentMaterial?.band_gap != null
-                      ? `${currentMaterial.band_gap.toFixed(3)} eV`
-                      : 'N/A'
-                  }}
-                </el-descriptions-item>
-                <el-descriptions-item label="生成能">
-                  {{
-                    currentMaterial?.formation_energy != null
-                      ? `${currentMaterial.formation_energy.toFixed(4)} eV/atom`
-                      : 'N/A'
-                  }}
-                </el-descriptions-item>
-                <el-descriptions-item label="密度">
-                  {{
-                    currentMaterial?.density != null
-                      ? `${currentMaterial.density.toFixed(2)} g/cm³`
-                      : 'N/A'
-                  }}
-                </el-descriptions-item>
-              </el-descriptions>
-            </el-card>
-          </Transition>
-        </div>
       </div>
     </Transition>
 
@@ -355,21 +308,6 @@ const handleGeneratedCandidate = (candidate: GeneratedCandidate) => {
   pointer-events: auto;
 }
 
-/* Charts Panel */
-.charts-panel {
-  position: fixed;
-  right: 24px;
-  bottom: 92px;
-  z-index: 25;
-  width: 420px;
-}
-
-.charts-toggle {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: 8px;
-}
-
 /* Bottom Hint - Centered */
 .bottom-hint {
   position: fixed;
@@ -412,21 +350,6 @@ const handleGeneratedCandidate = (candidate: GeneratedCandidate) => {
 .slide-right-leave-to {
   opacity: 0;
   transform: translateX(30px);
-}
-
-.slide-up-enter-active,
-.slide-up-leave-active {
-  transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.slide-up-enter-from {
-  opacity: 0;
-  transform: translateY(20px);
-}
-
-.slide-up-leave-to {
-  opacity: 0;
-  transform: translateY(20px);
 }
 
 @media (max-width: 640px) {

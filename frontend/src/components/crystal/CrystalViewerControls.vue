@@ -28,6 +28,7 @@ const preset = computed({
     setPreset(Number(value))
   },
 })
+
 </script>
 
 <template>

@@ -7,8 +7,12 @@ import {
   ref,
   watch,
 } from 'vue'
+import { Operation } from '@element-plus/icons-vue'
 import CrystalViewerControls from './CrystalViewerControls.vue'
-import { MolstarAdapter } from '../../services/molstarAdapter'
+import {
+  MolstarAdapter,
+  type AtomHoverInfo,
+} from '../../services/molstarAdapter'
 import { useCrystalViewSettings } from '../../composables/useCrystalViewSettings'
 
 interface Props {
@@ -28,6 +32,8 @@ const { settings, resetSupercell } = useCrystalViewSettings()
 const viewerReady = ref(false)
 const isRendering = ref(false)
 const renderError = ref<string | null>(null)
+const hoverInfo = ref<AtomHoverInfo | null>(null)
+const controlsOpen = ref(false)
 
 let lastCif: string | null = null
 let renderQueue = Promise.resolve()
@@ -36,6 +42,25 @@ const showControls = computed(() => Boolean(props.cifData))
 const showLoading = computed(
   () => props.isLoading || !viewerReady.value || isRendering.value
 )
+const tooltipStyle = computed(() => {
+  if (!hoverInfo.value) return {}
+
+  const tooltipWidth = 196
+  const tooltipHeight = 84
+  const offset = 14
+  const padding = 8
+  const maxX = Math.max(padding, window.innerWidth - tooltipWidth - padding)
+  const maxY = Math.max(padding, window.innerHeight - tooltipHeight - padding)
+
+  return {
+    left: `${Math.min(hoverInfo.value.x + offset, maxX)}px`,
+    top: `${Math.min(hoverInfo.value.y + offset, maxY)}px`,
+  }
+})
+
+adapter.onHover = (info) => {
+  hoverInfo.value = info
+}
 
 function queueRender() {
   renderQueue = renderQueue
@@ -83,6 +108,7 @@ watch(
   (cif) => {
     if (cif !== lastCif) {
       lastCif = cif
+      controlsOpen.value = false
       resetSupercell()
     }
     queueRender()
@@ -124,6 +150,23 @@ defineExpose({
   <div class="crystal-viewer-container">
     <div ref="containerRef" class="viewer-container"></div>
 
+    <Transition name="atom-tooltip">
+      <div
+        v-if="hoverInfo && !showLoading"
+        class="atom-tooltip"
+        :style="tooltipStyle"
+        aria-hidden="true"
+      >
+        <strong class="atom-tooltip-symbol">{{ hoverInfo.symbol }}</strong>
+        <span v-if="hoverInfo.atomicNumber" class="atom-tooltip-meta">
+          原子序数 {{ hoverInfo.atomicNumber }}
+        </span>
+        <span v-if="hoverInfo.atomId != null" class="atom-tooltip-meta">
+          原子 ID {{ hoverInfo.atomId }}
+        </span>
+      </div>
+    </Transition>
+
     <Transition name="fade">
       <div v-if="showLoading" class="loading-overlay">
         <div class="loading-spinner"></div>
@@ -142,11 +185,24 @@ defineExpose({
       />
     </div>
 
-    <Transition name="slide-up">
+    <Teleport to="body">
       <div v-if="showControls" class="crystal-controls-overlay">
-        <CrystalViewerControls @reset-view="resetView" />
+        <Transition name="slide-up">
+          <CrystalViewerControls
+            v-if="controlsOpen"
+            @reset-view="resetView"
+          />
+        </Transition>
+        <el-button
+          :type="controlsOpen ? 'primary' : 'default'"
+          size="small"
+          :icon="Operation"
+          @click="controlsOpen = !controlsOpen"
+        >
+          {{ controlsOpen ? '隐藏晶胞' : '晶胞显示' }}
+        </el-button>
       </div>
-    </Transition>
+    </Teleport>
   </div>
 </template>
 
@@ -162,6 +218,34 @@ defineExpose({
 .viewer-container {
   width: 100%;
   height: 100%;
+}
+
+.atom-tooltip {
+  position: absolute;
+  z-index: 12;
+  display: flex;
+  flex-direction: column;
+  width: min(180px, calc(100vw - 16px));
+  padding: 8px 10px;
+  color: var(--el-text-color-primary);
+  background: var(--el-bg-color-overlay);
+  border: 1px solid var(--el-border-color);
+  border-radius: 6px;
+  box-shadow: var(--el-box-shadow-light);
+  pointer-events: none;
+  user-select: none;
+}
+
+.atom-tooltip-symbol {
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.atom-tooltip-meta {
+  margin-top: 3px;
+  font-size: 12px;
+  line-height: 1.3;
+  color: var(--el-text-color-regular);
 }
 
 .loading-overlay {
@@ -208,34 +292,43 @@ defineExpose({
 
 .crystal-controls-overlay {
   position: fixed;
-  bottom: 58px;
-  left: 50%;
+  right: 24px;
+  bottom: 92px;
   z-index: 32;
-  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  width: min(380px, calc(100vw - 24px));
 }
 
 .fade-enter-active,
 .fade-leave-active,
+.atom-tooltip-enter-active,
+.atom-tooltip-leave-active,
 .slide-up-enter-active,
 .slide-up-leave-active {
   transition: opacity 0.25s, transform 0.25s;
 }
 
 .fade-enter-from,
-.fade-leave-to {
+.fade-leave-to,
+.atom-tooltip-enter-from,
+.atom-tooltip-leave-to {
   opacity: 0;
 }
 
 .slide-up-enter-from,
 .slide-up-leave-to {
   opacity: 0;
-  transform: translate(-50%, 14px);
+  transform: translateY(14px);
 }
 
 @media (max-width: 640px) {
   .crystal-controls-overlay {
-    bottom: 52px;
-    width: calc(100vw - 24px);
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
   }
 }
 </style>
