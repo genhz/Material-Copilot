@@ -404,6 +404,10 @@ class GenerationManager:
             environment = os.environ.copy()
             environment["PYTHONUNBUFFERED"] = "1"
             environment.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+            environment.setdefault(
+                "PYTORCH_CUDA_ALLOC_CONF",
+                self.config.cuda_alloc_conf,
+            )
             python_path = environment.get("PYTHONPATH", "")
             environment["PYTHONPATH"] = (
                 f"{backend_root}{os.pathsep}{python_path}"

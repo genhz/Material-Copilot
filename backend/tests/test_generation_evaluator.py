@@ -50,3 +50,27 @@ def test_extract_candidates_records_invalid_cif(tmp_path: Path) -> None:
     assert collection.total_count == 1
     assert collection.invalid_count == 1
     assert collection.candidates == []
+
+
+def test_extract_candidates_honors_requested_limit(tmp_path: Path) -> None:
+    structure = Structure(
+        lattice=Lattice.cubic(4.0),
+        species=["Na", "Cl"],
+        coords=[[0, 0, 0], [0.5, 0.5, 0.5]],
+    )
+    archive_path = tmp_path / "generated_crystals_cif.zip"
+    with ZipFile(archive_path, "w") as archive:
+        for index in range(3):
+            archive.writestr(f"gen_{index:03d}.cif", structure.to(fmt="cif"))
+
+    collection = extract_candidates(
+        archive_path,
+        job_id="00000000-0000-0000-0000-000000000003",
+        request=GenerationRequest(target_magnetic_density=0.15),
+        model_spec=get_model_spec("dft_mag_density"),
+        candidates_dir=tmp_path / "candidates",
+        max_candidates=2,
+    )
+
+    assert collection.total_count == 2
+    assert len(collection.candidates) == 2

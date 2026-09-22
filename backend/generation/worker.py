@@ -103,6 +103,7 @@ def run_job(job_id: str) -> int:
             request=job_request,
             model_spec=model_spec,
             candidates_dir=store.candidates_dir(job_id),
+            max_candidates=job_request.num_candidates,
         )
         if not collection.candidates:
             raise GenerationError(

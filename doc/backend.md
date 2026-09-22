@@ -121,8 +121,11 @@ print(f"API Key: {config.api_key}")   # e.g. "sk-..."
 | `LLM_MODEL` | 模型名称 |
 | `MP_API_KEY` | Materials Project API 密钥 |
 | `MATTERGEN_ENABLED` | 是否启用 MatterGen 生成功能 |
-| `MATTERGEN_MAX_CONCURRENCY` | Worker 最大并发，首版固定为 1 |
-| `MATTERGEN_WORKER_TIMEOUT_SECONDS` | Worker 超时时间 |
+| `MATTERGEN_MAX_CONCURRENCY` | Worker 最大并发，3090 单卡推荐为 1 |
+| `MATTERGEN_MAX_BATCH_SIZE` | 单个扩散批次的最大候选数，3090 推荐为 8 |
+| `MATTERGEN_WORKER_TIMEOUT_SECONDS` | Worker 总超时时间，3090 推荐为 14400 |
+| `MATTERGEN_CUDA_ALLOC_CONF` | CUDA 显存分配策略，推荐 `expandable_segments:True` |
+| `MATTERGEN_TORCH_MATMUL_PRECISION` | FP32 矩阵计算精度，Ampere 显卡推荐 `high` |
 
 ## 语义意图路由
 

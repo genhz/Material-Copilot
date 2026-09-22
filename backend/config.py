@@ -88,8 +88,11 @@ class MatterGenConfig:
     enabled: bool
     artifact_root: Path
     max_concurrency: int
+    max_batch_size: int
     job_retention_days: int
     worker_timeout_seconds: int
+    cuda_alloc_conf: str
+    torch_matmul_precision: str
 
     @classmethod
     def load(cls) -> "MatterGenConfig":
@@ -106,11 +109,22 @@ class MatterGenConfig:
             max_concurrency=max(
                 1, int(os.getenv("MATTERGEN_MAX_CONCURRENCY", "1"))
             ),
+            max_batch_size=max(
+                1, int(os.getenv("MATTERGEN_MAX_BATCH_SIZE", "8"))
+            ),
             job_retention_days=max(
                 1, int(os.getenv("MATTERGEN_JOB_RETENTION_DAYS", "7"))
             ),
             worker_timeout_seconds=max(
-                1, int(os.getenv("MATTERGEN_WORKER_TIMEOUT_SECONDS", "7200"))
+                1, int(os.getenv("MATTERGEN_WORKER_TIMEOUT_SECONDS", "14400"))
+            ),
+            cuda_alloc_conf=os.getenv(
+                "MATTERGEN_CUDA_ALLOC_CONF",
+                "expandable_segments:True",
+            ),
+            torch_matmul_precision=os.getenv(
+                "MATTERGEN_TORCH_MATMUL_PRECISION",
+                "high",
             ),
         )
 

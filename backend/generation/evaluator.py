@@ -90,6 +90,7 @@ def extract_candidates(
     request: GenerationRequest,
     model_spec: MatterGenModelSpec,
     candidates_dir: Path,
+    max_candidates: int | None = None,
 ) -> CandidateCollection:
     """Read a MatterGen CIF ZIP and return validated candidates."""
 
@@ -102,6 +103,7 @@ def extract_candidates(
 
     candidates: list[GeneratedCandidate] = []
     invalid_count = 0
+    processed_count = 0
     errors: list[str] = []
     candidates_dir.mkdir(parents=True, exist_ok=True)
 
@@ -113,6 +115,12 @@ def extract_candidates(
                 if name.lower().endswith(".cif") and not name.startswith("/")
             )
             for index, name in enumerate(cif_names):
+                if (
+                    max_candidates is not None
+                    and len(candidates) >= max_candidates
+                ):
+                    break
+                processed_count += 1
                 try:
                     cif_text = archive.read(name).decode("utf-8")
                     structure = Structure.from_str(cif_text, fmt="cif")
@@ -141,10 +149,12 @@ def extract_candidates(
     return CandidateCollection(
         candidates=candidates,
         invalid_count=invalid_count,
-        total_count=len(cif_names),
+        total_count=processed_count,
         validation={
             "valid_count": len(candidates),
             "invalid_count": invalid_count,
+            "processed_count": processed_count,
+            "requested_count": max_candidates,
             "errors": errors[:20],
         },
     )

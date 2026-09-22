@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -12,6 +13,22 @@ from generation.schemas import GenerationRequest
 
 
 ProgressCallback = Callable[..., None]
+
+
+def resolve_batch_shape(
+    total_candidates: int,
+    max_batch_size: int,
+) -> tuple[int, int]:
+    """Split a requested sample count into bounded MatterGen batches."""
+
+    total = max(1, total_candidates)
+    max_batch = max(1, max_batch_size)
+    if total <= max_batch:
+        return total, 1
+
+    num_batches = math.ceil(total / max_batch)
+    batch_size = math.ceil(total / num_batches)
+    return batch_size, num_batches
 
 
 class MatterGenAdapter:
@@ -89,6 +106,7 @@ class MatterGenAdapter:
         output_dir.mkdir(parents=True, exist_ok=True)
 
         try:
+            import torch
             from mattergen.common.utils.data_classes import MatterGenCheckpointInfo
             from mattergen.generator import CrystalGenerator
         except Exception as exc:
@@ -97,6 +115,10 @@ class MatterGenAdapter:
                 f"MatterGen 导入失败：{exc}",
                 status_code=503,
             ) from exc
+
+        torch.set_float32_matmul_precision(
+            self.config.torch_matmul_precision
+        )
 
         checkpoint_info = MatterGenCheckpointInfo(
             model_path=model_spec.checkpoint_dir,
@@ -109,11 +131,15 @@ class MatterGenAdapter:
             if request.guidance_scale is not None
             else model_spec.default_guidance_scale
         )
+        batch_size, num_batches = resolve_batch_shape(
+            request.num_candidates,
+            self.config.max_batch_size,
+        )
         generator = CrystalGenerator(
             checkpoint_info=checkpoint_info,
             properties_to_condition_on=request.conditions,
-            batch_size=request.num_candidates,
-            num_batches=1,
+            batch_size=batch_size,
+            num_batches=num_batches,
             sampling_config_name="default",
             record_trajectories=False,
             diffusion_guidance_factor=guidance_scale,
@@ -122,7 +148,8 @@ class MatterGenAdapter:
         )
 
         try:
-            return generator.generate(output_dir=output_dir)
+            structures = generator.generate(output_dir=output_dir)
+            return structures[: request.num_candidates]
         except GenerationError:
             raise
         except Exception as exc:
