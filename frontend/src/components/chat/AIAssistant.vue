@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, nextTick, watch } from 'vue'
 import { ChatDotRound, Close, Position, Loading } from '@element-plus/icons-vue'
+import DOMPurify from 'dompurify'
+import { marked } from 'marked'
 import { useAIChat } from '../../composables/useAIChat'
 import type { MaterialData } from '../../types/material'
 
@@ -14,6 +16,45 @@ const { messages, isChatting, sendMessage, clearChat } = useAIChat()
 const chatVisible = ref(false)
 const inputMessage = ref('')
 const chatContainerRef = ref<HTMLElement | null>(null)
+
+const renderMarkdown = (content: string) => {
+  const html = marked.parse(content, {
+    async: false,
+    breaks: true,
+    gfm: true,
+  })
+
+  return DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: [
+      'a',
+      'p',
+      'br',
+      'strong',
+      'em',
+      'del',
+      'blockquote',
+      'ul',
+      'ol',
+      'li',
+      'h1',
+      'h2',
+      'h3',
+      'h4',
+      'h5',
+      'h6',
+      'code',
+      'pre',
+      'table',
+      'thead',
+      'tbody',
+      'tr',
+      'th',
+      'td',
+      'hr',
+    ],
+    ALLOWED_ATTR: ['href', 'title'],
+  })
+}
 
 const suggestions = [
   { label: '查看 Fe3O4', text: '查看 Fe3O4 的晶体结构' },
@@ -132,7 +173,17 @@ watch(messages, async () => {
               🤖
             </el-avatar>
             <div class="message-bubble">
-              <p class="message-content">{{ msg.content }}</p>
+              <p
+                v-if="msg.role === 'user'"
+                class="message-content message-plain"
+              >
+                {{ msg.content }}
+              </p>
+              <div
+                v-else
+                class="message-content message-markdown"
+                v-html="renderMarkdown(msg.content)"
+              />
             </div>
           </div>
 
@@ -301,8 +352,122 @@ watch(messages, async () => {
 
 .message-content {
   margin: 0;
-  white-space: pre-wrap;
   word-break: break-word;
+}
+
+.message-plain {
+  white-space: pre-wrap;
+}
+
+.message-markdown {
+  white-space: normal;
+}
+
+.message-markdown :deep(> :first-child) {
+  margin-top: 0;
+}
+
+.message-markdown :deep(> :last-child) {
+  margin-bottom: 0;
+}
+
+.message-markdown :deep(p) {
+  margin: 0 0 8px;
+}
+
+.message-markdown :deep(h1),
+.message-markdown :deep(h2),
+.message-markdown :deep(h3),
+.message-markdown :deep(h4) {
+  margin: 14px 0 8px;
+  line-height: 1.35;
+}
+
+.message-markdown :deep(h1) {
+  font-size: 18px;
+}
+
+.message-markdown :deep(h2) {
+  font-size: 16px;
+}
+
+.message-markdown :deep(h3),
+.message-markdown :deep(h4) {
+  font-size: 14px;
+}
+
+.message-markdown :deep(ul),
+.message-markdown :deep(ol) {
+  margin: 6px 0 8px;
+  padding-left: 20px;
+}
+
+.message-markdown :deep(li + li) {
+  margin-top: 4px;
+}
+
+.message-markdown :deep(blockquote) {
+  margin: 8px 0;
+  padding: 4px 10px;
+  color: var(--el-text-color-secondary);
+  border-left: 3px solid var(--el-border-color);
+}
+
+.message-markdown :deep(code) {
+  padding: 1px 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  background: var(--el-fill-color-darker);
+  border-radius: 4px;
+}
+
+.message-markdown :deep(pre) {
+  margin: 8px 0;
+  padding: 10px;
+  overflow-x: auto;
+  background: var(--el-fill-color-darker);
+  border-radius: 6px;
+}
+
+.message-markdown :deep(pre code) {
+  padding: 0;
+  white-space: pre;
+  background: transparent;
+}
+
+.message-markdown :deep(a) {
+  color: var(--el-color-primary);
+  text-decoration: none;
+}
+
+.message-markdown :deep(a:hover) {
+  text-decoration: underline;
+}
+
+.message-markdown :deep(table) {
+  display: block;
+  width: 100%;
+  margin: 8px 0;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.message-markdown :deep(th),
+.message-markdown :deep(td) {
+  padding: 5px 8px;
+  text-align: left;
+  border: 1px solid var(--el-border-color);
+}
+
+.message-markdown :deep(th) {
+  font-weight: 600;
+  background: var(--el-fill-color-light);
+}
+
+.message-markdown :deep(hr) {
+  margin: 12px 0;
+  border: 0;
+  border-top: 1px solid var(--el-border-color-light);
 }
 
 .message-bubble-loading {

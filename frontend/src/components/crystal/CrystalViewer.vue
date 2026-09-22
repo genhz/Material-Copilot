@@ -293,7 +293,7 @@ defineExpose({
 .crystal-controls-overlay {
   position: fixed;
   right: 24px;
-  bottom: 92px;
+  bottom: 148px;
   z-index: 32;
   display: flex;
   flex-direction: column;
@@ -328,7 +328,7 @@ defineExpose({
   .crystal-controls-overlay {
     left: 12px;
     right: 12px;
-    bottom: 12px;
+    bottom: 152px;
   }
 }
 </style>
