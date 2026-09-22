@@ -11,8 +11,10 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from agent_workflow.planner import WorkflowPlanner
-from agent_workflow.schemas import ExecutionPlan, WorkflowRunState
+from agent_workflow.schemas import ExecutionPlan, PlanStep, WorkflowRunState
+from generation.exceptions import GenerationError
 from generation.manager import get_generation_manager
+from generation.model_registry import get_model_spec
 from generation.schemas import GenerationRequest
 
 
@@ -321,14 +323,92 @@ class AgentWorkflowService:
         assert workflow is not None
         workflow.status = "running"
         plan.status = "executing"
+        plan.updated_at = datetime.now(timezone.utc)
         job_ids: list[str] = []
         candidate_jobs: list[str] = []
+        had_optional_failure = False
         total_steps = max(1, len(plan.steps))
+        steps_by_id = {step.id: step for step in plan.steps}
 
         try:
+            generation_steps = [
+                step for step in plan.steps if step.kind == "generate"
+            ]
+            for step in generation_steps:
+                preflight_error = self._preflight_step(plan, step)
+                if preflight_error is None:
+                    continue
+                step.status = "failed"
+                step.error_message = preflight_error
+                await self.publish(
+                    state.session_id,
+                    "step.failed",
+                    {
+                        "workflow_id": workflow.workflow_id,
+                        "step": step.model_dump(mode="json"),
+                    },
+                )
+                if step.required:
+                    await self._abort_workflow(
+                        state,
+                        plan,
+                        workflow,
+                        step,
+                        preflight_error,
+                    )
+                    return
+                had_optional_failure = True
+
             for index, step in enumerate(plan.steps):
                 workflow.current_step_id = step.id
+
+                if step.status in {"failed", "blocked", "skipped", "cancelled"}:
+                    continue
+
+                if not self._dependencies_satisfied(
+                    step,
+                    steps_by_id,
+                ):
+                    step.status = "blocked"
+                    step.error_message = "依赖步骤未成功完成。"
+                    workflow.blocked_step_ids = [
+                        *workflow.blocked_step_ids,
+                        step.id,
+                    ]
+                    await self.publish(
+                        state.session_id,
+                        "step.blocked",
+                        {
+                            "workflow_id": workflow.workflow_id,
+                            "step": step.model_dump(mode="json"),
+                        },
+                    )
+                    continue
+
                 step.status = "running"
+
+                if (
+                    step.requires_candidates
+                    and not candidate_jobs
+                ):
+                    step.status = "skipped"
+                    step.error_message = "没有可用的生成候选。"
+                    await self.publish(
+                        state.session_id,
+                        "step.skipped",
+                        {
+                            "workflow_id": workflow.workflow_id,
+                            "step": step.model_dump(mode="json"),
+                        },
+                    )
+                    await self._abort_workflow(
+                        state,
+                        plan,
+                        workflow,
+                        step,
+                        "所有生成步骤均未产生可用候选。",
+                    )
+                    return
 
                 if step.kind != "generate":
                     step.status = "completed"
@@ -352,33 +432,164 @@ class AgentWorkflowService:
                     workflow.progress = (index + 1) / total_steps
                     continue
 
+                success, job_id = await self._run_generation_step(
+                    state,
+                    plan,
+                    workflow,
+                    step,
+                    index,
+                    total_steps,
+                )
+                if success and job_id:
+                    candidate_jobs.append(job_id)
+                    job_ids.append(job_id)
+                    workflow.job_ids = list(job_ids)
+                elif step.required:
+                    await self._abort_workflow(
+                        state,
+                        plan,
+                        workflow,
+                        step,
+                        step.error_message or "生成步骤失败。",
+                    )
+                    return
+                else:
+                    had_optional_failure = True
+                workflow.progress = (index + 1) / total_steps
+
+            candidate_count = 0
+            for job_id in candidate_jobs:
                 try:
-                    request = GenerationRequest(
-                        model_id=step.model_id,
-                        conditions=step.conditions,
-                        required_elements=plan.request_spec.required_elements,
-                        allowed_elements=plan.request_spec.allowed_elements,
-                        excluded_elements=plan.request_spec.excluded_elements,
-                        num_candidates=step.num_candidates or 8,
-                        guidance_scale=step.guidance_scale,
-                        seed=step.seed,
-                    )
-                    job = await manager.submit(request)
-                except Exception as exc:
-                    step.status = "failed"
-                    step.error_message = str(exc)
-                    await self.publish(
-                        state.session_id,
-                        "step.failed",
-                        {
-                            "workflow_id": workflow.workflow_id,
-                            "step": step.model_dump(mode="json"),
-                        },
-                    )
-                    continue
+                    collection = await manager.get_candidates(job_id)
+                    candidate_count += len(collection.candidates)
+                except Exception:
+                    pass
+
+            workflow.candidate_count = candidate_count
+            if candidate_count == 0:
+                await self._abort_workflow(
+                    state,
+                    plan,
+                    workflow,
+                    None,
+                    "所有生成步骤均未产生满足约束的候选。",
+                )
+                return
+
+            if not had_optional_failure:
+                workflow.status = "completed"
+                plan.status = "completed"
+            else:
+                workflow.status = "partial"
+                plan.status = "partial"
+
+            await self.publish(
+                state.session_id,
+                "workflow.completed",
+                {
+                    "workflow": workflow.model_dump(mode="json"),
+                    "plan": plan.model_dump(mode="json"),
+                },
+            )
+        except asyncio.CancelledError:
+            workflow.status = "cancelled"
+            plan.status = "cancelled"
+            await self.publish(state.session_id, "workflow.cancelled")
+        except Exception as exc:
+            logger.exception("Agent workflow execution failed")
+            workflow.status = "failed"
+            workflow.error_message = str(exc)
+            plan.status = "failed"
+            await self.publish(
+                state.session_id,
+                "workflow.failed",
+                {
+                    "workflow": workflow.model_dump(mode="json"),
+                    "error": str(exc),
+                },
+            )
+
+    def _preflight_step(
+        self,
+        plan: ExecutionPlan,
+        step: PlanStep,
+    ) -> Optional[str]:
+        if step.kind != "generate" or not step.model_id:
+            return None
+        try:
+            request = self._generation_request(plan, step)
+            request = request.normalized()
+            manager = get_generation_manager()
+            manager.adapter.preflight(
+                get_model_spec(request.model_id or "")
+            )
+            return None
+        except Exception as exc:
+            return str(exc)
+
+    def _generation_request(
+        self,
+        plan: ExecutionPlan,
+        step: PlanStep,
+        attempt: int = 0,
+    ) -> GenerationRequest:
+        seed = step.seed
+        if seed is not None and attempt:
+            seed += attempt
+        return GenerationRequest(
+            model_id=step.model_id,
+            conditions=step.conditions,
+            required_elements=plan.request_spec.required_elements,
+            allowed_elements=plan.request_spec.allowed_elements,
+            excluded_elements=plan.request_spec.excluded_elements,
+            num_candidates=step.num_candidates or 8,
+            guidance_scale=step.guidance_scale,
+            seed=seed,
+        )
+
+    def _dependencies_satisfied(
+        self,
+        step: PlanStep,
+        steps_by_id: dict[str, PlanStep],
+    ) -> bool:
+        if not step.depends_on:
+            return True
+        statuses = [
+            steps_by_id[dependency_id].status
+            for dependency_id in step.depends_on
+            if dependency_id in steps_by_id
+        ]
+        if step.dependency_policy == "any":
+            return "completed" in statuses
+        return bool(statuses) and all(
+            status == "completed" for status in statuses
+        )
+
+    async def _run_generation_step(
+        self,
+        state: AgentSessionState,
+        plan: ExecutionPlan,
+        workflow: WorkflowRunState,
+        step: PlanStep,
+        index: int,
+        total_steps: int,
+    ) -> tuple[bool, Optional[str]]:
+        manager = get_generation_manager()
+        attempts = step.max_retries + 1
+
+        for attempt in range(attempts):
+            try:
+                request = self._generation_request(plan, step, attempt)
+                request = request.normalized()
+                job = await manager.submit(request)
+            except GenerationError as exc:
+                step.error_message = exc.message
+                retryable = self._is_retryable(exc.code)
+            except Exception as exc:
+                step.error_message = str(exc)
+                retryable = False
+            else:
                 step.job_id = job.job_id
-                job_ids.append(job.job_id)
-                workflow.job_ids = list(job_ids)
                 await self.publish(
                     state.session_id,
                     "step.started",
@@ -412,74 +623,97 @@ class AgentWorkflowService:
                         "cancelled",
                     }:
                         if current.status == "completed":
-                            candidate_jobs.append(job.job_id)
                             step.status = "completed"
-                        else:
-                            step.status = "failed"
-                            step.error_message = (
-                                current.error_message or current.message
-                            )
+                            return True, job.job_id
+                        step.status = "failed"
+                        step.error_message = (
+                            current.error_message or current.message
+                        )
+                        retryable = self._is_retryable(
+                            current.error_code or ""
+                        )
                         break
                     await asyncio.sleep(0.5)
 
+            step.status = "failed"
+            if not retryable or attempt >= attempts - 1:
                 await self.publish(
                     state.session_id,
-                    (
-                        "step.completed"
-                        if step.status == "completed"
-                        else "step.failed"
-                    ),
+                    "step.failed",
                     {
                         "workflow_id": workflow.workflow_id,
                         "step": step.model_dump(mode="json"),
                     },
                 )
-                workflow.progress = (index + 1) / total_steps
-
-            candidate_count = 0
-            for job_id in candidate_jobs:
-                try:
-                    collection = await manager.get_candidates(job_id)
-                    candidate_count += len(collection.candidates)
-                except Exception:
-                    pass
-
-            workflow.candidate_count = candidate_count
-            if candidate_jobs and len(candidate_jobs) == len(job_ids):
-                workflow.status = "completed"
-                plan.status = "completed"
-            elif candidate_jobs:
-                workflow.status = "partial"
-                plan.status = "partial"
-            else:
-                workflow.status = "failed"
-                plan.status = "failed"
+                return False, None
 
             await self.publish(
                 state.session_id,
-                "workflow.completed",
+                "generation.retry.scheduled",
                 {
-                    "workflow": workflow.model_dump(mode="json"),
-                    "plan": plan.model_dump(mode="json"),
+                    "workflow_id": workflow.workflow_id,
+                    "step_id": step.id,
+                    "attempt": attempt + 1,
+                    "max_attempts": attempts,
+                    "message": step.error_message,
                 },
             )
-        except asyncio.CancelledError:
-            workflow.status = "cancelled"
-            plan.status = "cancelled"
-            await self.publish(state.session_id, "workflow.cancelled")
-        except Exception as exc:
-            logger.exception("Agent workflow execution failed")
-            workflow.status = "failed"
-            workflow.error_message = str(exc)
-            plan.status = "failed"
+            await asyncio.sleep(step.retry_delay_seconds)
+            step.status = "running"
+
+        return False, None
+
+    @staticmethod
+    def _is_retryable(error_code: str) -> bool:
+        return error_code in {
+            "GENERATION_FAILED",
+            "GENERATION_TIMEOUT",
+            "INVALID_OUTPUT",
+        }
+
+    async def _abort_workflow(
+        self,
+        state: AgentSessionState,
+        plan: ExecutionPlan,
+        workflow: WorkflowRunState,
+        failed_step: Optional[PlanStep],
+        reason: str,
+    ) -> None:
+        blocked_ids: list[str] = [
+            step.id for step in plan.steps if step.status == "blocked"
+        ]
+        for step in plan.steps:
+            if step.status != "pending":
+                continue
+            step.status = "blocked"
+            step.error_message = "上游步骤失败，未执行。"
+            blocked_ids.append(step.id)
             await self.publish(
                 state.session_id,
-                "workflow.failed",
+                "step.blocked",
                 {
-                    "workflow": workflow.model_dump(mode="json"),
-                    "error": str(exc),
+                    "workflow_id": workflow.workflow_id,
+                    "step": step.model_dump(mode="json"),
                 },
             )
+
+        workflow.status = "failed"
+        workflow.failed_step_id = failed_step.id if failed_step else None
+        workflow.blocked_step_ids = blocked_ids
+        workflow.error_message = reason
+        plan.status = "failed"
+        await self.publish(
+            state.session_id,
+            "workflow.aborted",
+            {
+                "workflow": workflow.model_dump(mode="json"),
+                "plan": plan.model_dump(mode="json"),
+                "failed_step_id": workflow.failed_step_id,
+                "blocked_step_ids": blocked_ids,
+                "reason": reason,
+                "recoverable": False,
+            },
+        )
 
 
 _service: Optional[AgentWorkflowService] = None

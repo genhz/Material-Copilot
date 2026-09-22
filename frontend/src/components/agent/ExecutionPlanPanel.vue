@@ -6,6 +6,7 @@ import {
   Edit,
   Loading,
   VideoPause,
+  Warning,
 } from '@element-plus/icons-vue'
 import type {
   ExecutionPlan,
@@ -56,6 +57,7 @@ function stepType(step: PlanStep) {
   if (step.status === 'completed') return 'success'
   if (step.status === 'failed') return 'danger'
   if (step.status === 'running') return 'primary'
+  if (step.status === 'blocked' || step.status === 'skipped') return 'warning'
   return 'info'
 }
 
@@ -174,6 +176,9 @@ function submitRevision() {
               <Loading v-if="step.status === 'running'" class="is-loading" />
               <Check v-else-if="step.status === 'completed'" />
               <Close v-else-if="step.status === 'failed'" />
+              <Warning
+                v-else-if="step.status === 'blocked' || step.status === 'skipped'"
+              />
               <Edit v-else />
             </el-icon>
             <div class="step-body">
@@ -252,10 +257,11 @@ function submitRevision() {
 
 <style scoped>
 .plan-panel {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
+  width: 100%;
   overflow: hidden;
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 10px;
 }
 
 .plan-header {
@@ -280,10 +286,7 @@ function submitRevision() {
 }
 
 .plan-content {
-  flex: 1;
-  min-height: 0;
   padding: 18px 20px 24px;
-  overflow-y: auto;
 }
 
 .plan-summary {

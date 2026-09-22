@@ -23,6 +23,8 @@ StepStatus = Literal[
     "running",
     "completed",
     "failed",
+    "blocked",
+    "skipped",
     "cancelled",
 ]
 
@@ -65,6 +67,14 @@ class PlanStep(BaseModel):
     job_id: Optional[str] = None
     progress: float = 0.0
     error_message: Optional[str] = None
+    required: bool = True
+    depends_on: list[str] = Field(default_factory=list)
+    dependency_policy: Literal["all", "any"] = "all"
+    on_failure: Literal["abort", "continue", "retry"] = "abort"
+    max_retries: int = Field(default=0, ge=0, le=3)
+    retry_delay_seconds: float = Field(default=0.0, ge=0.0, le=30.0)
+    produces_candidates: bool = False
+    requires_candidates: bool = False
 
 
 class ExecutionPlan(BaseModel):
@@ -106,4 +116,6 @@ class WorkflowRunState(BaseModel):
     current_step_id: Optional[str] = None
     job_ids: list[str] = Field(default_factory=list)
     candidate_count: int = 0
+    failed_step_id: Optional[str] = None
+    blocked_step_ids: list[str] = Field(default_factory=list)
     error_message: Optional[str] = None

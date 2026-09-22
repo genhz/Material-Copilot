@@ -6,6 +6,7 @@ from agent_workflow.schemas import (
     ExecutionPlan,
     MaterialRequestSpec,
     PlanStep,
+    WorkflowRunState,
 )
 from agent_workflow.service import AgentWorkflowService
 from agent_workflow.semantics import extract_semantics
@@ -137,5 +138,106 @@ def test_confirmation_starts_workflow_execution() -> None:
         assert executions == ["plan-1"]
         event = await asyncio.wait_for(queue.get(), timeout=1)
         assert event["type"] == "plan.confirmed"
+
+    asyncio.run(run())
+
+
+def test_required_generation_failure_blocks_downstream_steps(
+    monkeypatch,
+) -> None:
+    async def run() -> None:
+        service = AgentWorkflowService()
+        state = service._session("failure-session")
+        state.workflow = WorkflowRunState(
+            workflow_id="workflow-1",
+            plan_id="plan-failure",
+            session_id="failure-session",
+        )
+        plan = ExecutionPlan(
+            plan_id="plan-failure",
+            session_id="failure-session",
+            original_message="生成必需候选",
+            summary="failure test",
+            request_spec=MaterialRequestSpec(
+                required_elements=["Nd", "Fe"],
+                allowed_elements=["Nd", "Fe"],
+                chemical_system="Nd-Fe",
+            ),
+            steps=[
+                PlanStep(
+                    id="generate-required",
+                    kind="generate",
+                    title="required",
+                    description="required",
+                    model_id="chemical_system",
+                    conditions={"chemical_system": "Nd-Fe"},
+                    num_candidates=8,
+                    required=True,
+                    max_retries=0,
+                ),
+                PlanStep(
+                    id="generate-optional",
+                    kind="generate",
+                    title="optional",
+                    description="optional",
+                    model_id="dft_mag_density",
+                    conditions={"dft_mag_density": 0.15},
+                    num_candidates=8,
+                    required=False,
+                ),
+                PlanStep(
+                    id="filter",
+                    kind="filter",
+                    title="filter",
+                    description="filter",
+                    depends_on=["generate-required", "generate-optional"],
+                    dependency_policy="any",
+                    requires_candidates=True,
+                ),
+                PlanStep(
+                    id="rank",
+                    kind="rank",
+                    title="rank",
+                    description="rank",
+                    depends_on=["filter"],
+                    requires_candidates=True,
+                ),
+            ],
+        )
+        state.current_plan = plan
+        queue = service.subscribe("failure-session")
+        calls: list[str] = []
+
+        class FakeManager:
+            async def startup(self) -> None:
+                return None
+
+        monkeypatch.setattr(
+            "agent_workflow.service.get_generation_manager",
+            lambda: FakeManager(),
+        )
+        monkeypatch.setattr(service, "_preflight_step", lambda *_: None)
+
+        async def fake_run(state, plan, workflow, step, index, total_steps):
+            calls.append(step.id)
+            step.status = "failed"
+            step.error_message = "no candidates"
+            return False, None
+
+        monkeypatch.setattr(service, "_run_generation_step", fake_run)
+        await service._execute_plan(state, plan)
+
+        assert calls == ["generate-required"]
+        assert plan.status == "failed"
+        assert state.workflow is not None
+        assert state.workflow.status == "failed"
+        assert plan.steps[1].status == "blocked"
+        assert plan.steps[2].status == "blocked"
+        assert plan.steps[3].status == "blocked"
+
+        events = []
+        while not queue.empty():
+            events.append(queue.get_nowait())
+        assert any(event["type"] == "workflow.aborted" for event in events)
 
     asyncio.run(run())

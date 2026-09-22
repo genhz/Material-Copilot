@@ -235,14 +235,26 @@ class WorkflowPlanner:
                 description=(
                     "删除必须包含、允许包含和禁止包含元素不满足的候选。"
                 ),
+                depends_on=[
+                    step.id for step in steps if step.kind == "generate"
+                ],
+                dependency_policy="any",
+                required=True,
+                on_failure="abort",
+                requires_candidates=True,
             )
         )
+        filter_step_id = steps[-1].id
         steps.append(
             PlanStep(
                 id=f"rank-{uuid.uuid4().hex[:8]}",
                 kind="rank",
                 title="汇总与排序",
                 description="合并不同生成器结果并返回去重后的候选摘要。",
+                depends_on=[filter_step_id],
+                required=True,
+                on_failure="abort",
+                requires_candidates=True,
             )
         )
         return steps
@@ -267,6 +279,11 @@ class WorkflowPlanner:
             num_candidates=num_candidates,
             guidance_scale=3.0,
             seed=seed,
+            required=False,
+            on_failure="continue",
+            max_retries=1,
+            retry_delay_seconds=1.0,
+            produces_candidates=True,
         )
 
     def _build_summary(

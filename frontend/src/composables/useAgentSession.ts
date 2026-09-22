@@ -40,13 +40,14 @@ function appendAssistantDelta(content: string) {
     messages.value.push({
       id: streamMessageId,
       role: 'assistant',
+      kind: 'text',
       content: '',
       streaming: true,
     })
   }
 
   const message = messages.value.find((item) => item.id === streamMessageId)
-  if (message) {
+  if (message?.kind === 'text') {
     message.content += content
   }
 }
@@ -57,6 +58,7 @@ function finishAssistantStream(content?: string) {
       messages.value.push({
         id: nextMessageId('assistant'),
         role: 'assistant',
+        kind: 'text',
         content,
       })
     }
@@ -64,7 +66,7 @@ function finishAssistantStream(content?: string) {
   }
 
   const message = messages.value.find((item) => item.id === streamMessageId)
-  if (message) {
+  if (message?.kind === 'text') {
     if (content && !message.content.trim()) {
       message.content = content
     }
@@ -74,15 +76,44 @@ function finishAssistantStream(content?: string) {
 }
 
 function upsertStep(step: PlanStep) {
-  if (!currentPlan.value) return
-  const index = currentPlan.value.steps.findIndex(
-    (item) => item.id === step.id
-  )
-  if (index >= 0) {
-    currentPlan.value.steps.splice(index, 1, step)
-  } else {
-    currentPlan.value.steps.push(step)
+  const plans = [
+    currentPlan.value,
+    ...messages.value
+      .filter((message) => message.kind === 'plan')
+      .map((message) => message.plan),
+  ].filter(Boolean) as ExecutionPlan[]
+
+  for (const plan of plans) {
+    const index = plan.steps.findIndex((item) => item.id === step.id)
+    if (index >= 0) {
+      plan.steps.splice(index, 1, step)
+    } else {
+      plan.steps.push(step)
+    }
   }
+}
+
+function setCurrentPlan(plan: ExecutionPlan) {
+  currentPlan.value = plan
+  const existing = messages.value.find(
+    (message) =>
+      message.kind === 'plan' && message.planId === plan.plan_id
+  )
+
+  if (existing?.kind === 'plan') {
+    existing.plan = plan
+    existing.revision = plan.revision
+    return
+  }
+
+  messages.value.push({
+    id: nextMessageId('plan'),
+    role: 'assistant',
+    kind: 'plan',
+    planId: plan.plan_id,
+    revision: plan.revision,
+    plan,
+  })
 }
 
 function applyEvent(message: RealtimeMessage) {
@@ -110,7 +141,7 @@ function applyEvent(message: RealtimeMessage) {
     }
     case 'plan.proposed':
     case 'plan.revised':
-      currentPlan.value = payload.plan as ExecutionPlan
+      setCurrentPlan(payload.plan as ExecutionPlan)
       workflow.value = null
       break
     case 'plan.confirmed':
@@ -121,6 +152,8 @@ function applyEvent(message: RealtimeMessage) {
     case 'step.started':
     case 'step.completed':
     case 'step.failed':
+    case 'step.blocked':
+    case 'step.skipped':
     case 'step.progress': {
       const step = payload.step as PlanStep | undefined
       if (step) {
@@ -133,14 +166,42 @@ function applyEvent(message: RealtimeMessage) {
           existing.progress = Number(payload.progress || existing.progress)
           if (message.type === 'step.completed') existing.status = 'completed'
           if (message.type === 'step.failed') existing.status = 'failed'
+          if (message.type === 'step.blocked') existing.status = 'blocked'
+          if (message.type === 'step.skipped') existing.status = 'skipped'
         }
       }
       break
     }
+    case 'generation.retry.scheduled':
+      messages.value.push({
+        id: nextMessageId('retry'),
+        role: 'assistant',
+        kind: 'text',
+        content:
+          `步骤 ${payload.step_id} 执行失败，正在重试 ` +
+          `${payload.attempt}/${payload.max_attempts}。\n` +
+          `原因：${payload.message || '未知错误'}`,
+      })
+      break
     case 'workflow.completed':
       workflow.value = payload.workflow as WorkflowRunState
-      currentPlan.value = payload.plan as ExecutionPlan
+      setCurrentPlan(payload.plan as ExecutionPlan)
       break
+    case 'workflow.aborted': {
+      workflow.value = payload.workflow as WorkflowRunState
+      setCurrentPlan(payload.plan as ExecutionPlan)
+      const blocked = (payload.blocked_step_ids || []).join('、') || '无'
+      messages.value.push({
+        id: nextMessageId('aborted'),
+        role: 'assistant',
+        kind: 'text',
+        content:
+          `执行已终止。\n\n` +
+          `原因：${payload.reason || '上游步骤失败'}\n\n` +
+          `未执行步骤：${blocked}`,
+      })
+      break
+    }
     case 'workflow.failed':
       workflow.value = payload.workflow as WorkflowRunState
       if (currentPlan.value) currentPlan.value.status = 'failed'
@@ -159,6 +220,7 @@ function applyEvent(message: RealtimeMessage) {
       messages.value.push({
         id: nextMessageId('error'),
         role: 'assistant',
+        kind: 'text',
         content: `错误：${payload.message || '未知错误'}`,
       })
       isPlanning.value = false
@@ -171,9 +233,14 @@ function applySnapshot(snapshot: any) {
   messages.value = (snapshot.messages || []).map((message: any) => ({
     id: nextMessageId(message.role),
     role: message.role,
+    kind: 'text',
     content: message.content,
   }))
-  currentPlan.value = snapshot.plan || null
+  if (snapshot.plan) {
+    setCurrentPlan(snapshot.plan)
+  } else {
+    currentPlan.value = null
+  }
   workflow.value = snapshot.workflow || null
   lastSequence = Number(snapshot.last_sequence || 0)
 }
@@ -206,6 +273,7 @@ function sendMessage(text: string) {
   messages.value.push({
     id: nextMessageId('user'),
     role: 'user',
+    kind: 'text',
     content,
   })
   socketApi?.send({
@@ -234,6 +302,7 @@ function revisePlan(instruction: string) {
   messages.value.push({
     id: nextMessageId('user'),
     role: 'user',
+    kind: 'text',
     content: `修改执行计划：${content}`,
   })
   socketApi?.send({

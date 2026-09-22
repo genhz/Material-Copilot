@@ -19,7 +19,6 @@ const emit = defineEmits<{
 
 const {
   messages,
-  currentPlan,
   workflow,
   isConnected,
   isPlanning,
@@ -184,34 +183,53 @@ watch(lastResult, (result) => {
                 </div>
               </div>
 
-              <div
-                v-for="message in messages"
-                :key="message.id"
-                class="message"
-                :class="
-                  message.role === 'user'
-                    ? 'message-user'
-                    : 'message-assistant'
-                "
-              >
-                <el-avatar v-if="message.role === 'assistant'" :size="30">
-                  🤖
-                </el-avatar>
-                <div class="message-bubble">
-                  <p
-                    v-if="message.role === 'user'"
-                    class="message-content message-plain"
-                  >
-                    {{ message.content }}
-                  </p>
-                  <div
-                    v-else
-                    class="message-content message-markdown"
-                    v-html="renderMarkdown(message.content)"
+              <template v-for="message in messages" :key="message.id">
+                <div
+                  v-if="message.kind === 'plan'"
+                  class="message message-assistant plan-message"
+                >
+                  <el-avatar :size="30">🤖</el-avatar>
+                  <ExecutionPlanPanel
+                    :plan="message.plan"
+                    :workflow="workflow"
+                    :is-connected="isConnected"
+                    @confirm="confirmPlan"
+                    @revise="revisePlan"
+                    @cancel="cancelWorkflow"
                   />
-                  <span v-if="message.streaming" class="stream-cursor" />
                 </div>
-              </div>
+
+                <div
+                  v-else
+                  class="message"
+                  :class="
+                    message.role === 'user'
+                      ? 'message-user'
+                      : 'message-assistant'
+                  "
+                >
+                  <el-avatar
+                    v-if="message.role === 'assistant'"
+                    :size="30"
+                  >
+                    🤖
+                  </el-avatar>
+                  <div class="message-bubble">
+                    <p
+                      v-if="message.role === 'user'"
+                      class="message-content message-plain"
+                    >
+                      {{ message.content }}
+                    </p>
+                    <div
+                      v-else
+                      class="message-content message-markdown"
+                      v-html="renderMarkdown(message.content)"
+                    />
+                    <span v-if="message.streaming" class="stream-cursor" />
+                  </div>
+                </div>
+              </template>
             </div>
 
             <div class="chat-input-area">
@@ -232,17 +250,6 @@ watch(lastResult, (result) => {
               />
             </div>
           </section>
-
-          <aside class="plan-pane">
-            <ExecutionPlanPanel
-              :plan="currentPlan"
-              :workflow="workflow"
-              :is-connected="isConnected"
-              @confirm="confirmPlan"
-              @revise="revisePlan"
-              @cancel="cancelWorkflow"
-            />
-          </aside>
         </div>
       </section>
     </Transition>
@@ -267,17 +274,18 @@ watch(lastResult, (result) => {
 <style scoped>
 .agent-workspace {
   position: fixed;
-  inset: 18px;
+  top: 0;
+  right: 0;
+  bottom: 0;
   z-index: 50;
   display: flex;
   flex-direction: column;
-  max-width: 1280px;
-  margin: auto;
+  width: clamp(430px, 33.333vw, 680px);
+  max-width: none;
   overflow: hidden;
   color: var(--el-text-color-primary);
   background: var(--el-bg-color);
-  border: 1px solid var(--el-border-color);
-  border-radius: 12px;
+  border-left: 1px solid var(--el-border-color);
   box-shadow: var(--el-box-shadow-dark);
 }
 
@@ -316,8 +324,7 @@ watch(lastResult, (result) => {
 }
 
 .workspace-body {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 420px;
+  display: flex;
   flex: 1;
   min-height: 0;
 }
@@ -388,6 +395,15 @@ watch(lastResult, (result) => {
   line-height: 1.7;
   background: var(--el-fill-color-light);
   border-radius: 12px;
+}
+
+.plan-message {
+  width: 100%;
+}
+
+.plan-message > :last-child {
+  flex: 1;
+  min-width: 0;
 }
 
 .message-user .message-bubble {
@@ -477,12 +493,6 @@ watch(lastResult, (result) => {
   border-top: 1px solid var(--el-border-color-light);
 }
 
-.plan-pane {
-  min-height: 0;
-  background: var(--el-bg-color-page);
-  border-left: 1px solid var(--el-border-color-light);
-}
-
 .ai-fab {
   position: fixed;
   right: 32px;
@@ -503,24 +513,9 @@ watch(lastResult, (result) => {
 
 @media (max-width: 900px) {
   .agent-workspace {
-    inset: 0;
+    left: 0;
+    width: 100vw;
     border: 0;
-    border-radius: 0;
-  }
-
-  .workspace-body {
-    grid-template-columns: 1fr;
-    overflow-y: auto;
-  }
-
-  .conversation-panel,
-  .plan-pane {
-    min-height: 60vh;
-  }
-
-  .plan-pane {
-    border-top: 1px solid var(--el-border-color-light);
-    border-left: 0;
   }
 }
 </style>

@@ -14,14 +14,28 @@ export type StepStatus =
   | 'running'
   | 'completed'
   | 'failed'
+  | 'blocked'
+  | 'skipped'
   | 'cancelled'
 
-export interface AgentMessage {
+export interface AgentTextMessage {
   id: string
   role: 'user' | 'assistant'
+  kind: 'text'
   content: string
   streaming?: boolean
 }
+
+export interface AgentPlanMessage {
+  id: string
+  role: 'assistant'
+  kind: 'plan'
+  planId: string
+  revision: number
+  plan: ExecutionPlan
+}
+
+export type AgentMessage = AgentTextMessage | AgentPlanMessage
 
 export interface PlanObjective {
   property: string
@@ -44,6 +58,14 @@ export interface PlanStep {
   job_id?: string | null
   progress: number
   error_message?: string | null
+  required: boolean
+  depends_on: string[]
+  dependency_policy: 'all' | 'any'
+  on_failure: 'abort' | 'continue' | 'retry'
+  max_retries: number
+  retry_delay_seconds: number
+  produces_candidates: boolean
+  requires_candidates: boolean
 }
 
 export interface ExecutionPlan {
@@ -82,6 +104,8 @@ export interface WorkflowRunState {
   current_step_id?: string | null
   job_ids: string[]
   candidate_count: number
+  failed_step_id?: string | null
+  blocked_step_ids: string[]
   error_message?: string | null
 }
 
