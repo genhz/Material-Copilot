@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 import uuid
-from typing import Optional, Sequence
+from typing import Any, Optional, Sequence
 
 from agent_workflow.capability_registry import (
     CapabilityMatch,
@@ -18,6 +18,11 @@ from agent_workflow.schemas import (
     PlanStep,
 )
 from agent_workflow.normalization import RARE_EARTH_ELEMENTS
+from agent_workflow.planning_policy import (
+    PlanningDecision,
+    PlanningPolicy,
+    get_planning_policy,
+)
 
 
 MAX_CANDIDATES_PER_STEP = 16
@@ -39,10 +44,12 @@ class WorkflowPlanner:
     def __init__(
         self,
         capability_registry: Optional[CapabilityRegistry] = None,
+        planning_policy: Optional[PlanningPolicy] = None,
     ):
         self.capability_registry = (
             capability_registry or get_capability_registry()
         )
+        self.planning_policy = planning_policy or get_planning_policy()
 
     def plan(
         self,
@@ -127,7 +134,13 @@ class WorkflowPlanner:
                 candidate_models=candidate_models,
             )
 
-        conditions, missing_conditions, condition_errors = (
+        (
+            conditions,
+            missing_conditions,
+            condition_errors,
+            objective_decisions,
+            parameter_sources,
+        ) = (
             self._build_conditions(normalized, selected)
         )
         if condition_errors:
@@ -159,6 +172,8 @@ class WorkflowPlanner:
             selected=selected,
             conditions=conditions,
             candidate_models=candidate_models,
+            objective_decisions=objective_decisions,
+            parameter_sources=parameter_sources,
         )
 
     def _plan_multi_model_requirement(
@@ -264,15 +279,26 @@ class WorkflowPlanner:
             )
 
         steps: list[PlanStep] = []
-        candidate_count = normalized.candidate_count or 2
+        candidate_decision = self.planning_policy.candidate_count(
+            normalized.candidate_count
+        )
+        candidate_count = int(candidate_decision.value)
+        planning_decisions = [candidate_decision.as_dict()]
         seed = (
             previous_plan.steps[0].seed
             if previous_plan and previous_plan.steps
             else None
         )
         for match in matches:
-            conditions, missing_conditions, condition_errors = (
-                self._build_conditions(normalized, match)
+            (
+                conditions,
+                missing_conditions,
+                condition_errors,
+                objective_decisions,
+                parameter_sources,
+            ) = self._build_conditions(
+                normalized,
+                match,
             )
             if condition_errors:
                 return self._build_decision_plan(
@@ -294,6 +320,12 @@ class WorkflowPlanner:
                     reasons=missing_conditions,
                     candidate_models=[item.model_id for item in matches],
                 )
+            planning_decisions.extend(
+                [
+                    *[decision.as_dict() for decision in objective_decisions],
+                    self._model_decision(normalized, match.model_id).as_dict(),
+                ]
+            )
             for count in self._split_candidate_count(candidate_count):
                 steps.append(
                     self._generate_step(
@@ -305,6 +337,15 @@ class WorkflowPlanner:
                             match.capability.default_guidance_scale
                         ),
                         seed=seed,
+                        parameter_sources={
+                            **parameter_sources,
+                            "candidate_count": candidate_decision.source,
+                            "guidance_scale": "model_default",
+                            "model_id": self._model_decision(
+                                normalized,
+                                match.model_id,
+                            ).source,
+                        },
                     )
                 )
 
@@ -330,6 +371,7 @@ class WorkflowPlanner:
             assumptions=assumptions,
             questions=[],
             steps=steps,
+            planning_decisions=planning_decisions,
         )
 
     def _plan_tool_requirement(
@@ -558,8 +600,17 @@ class WorkflowPlanner:
         selected: CapabilityMatch,
         conditions: dict[str, float | int | str],
         candidate_models: list[str],
+        objective_decisions: list[PlanningDecision],
+        parameter_sources: dict[str, str],
     ) -> ExecutionPlan:
-        candidate_count = requirement.candidate_count or 2
+        candidate_decision = self.planning_policy.candidate_count(
+            requirement.candidate_count
+        )
+        candidate_count = int(candidate_decision.value)
+        model_decision = self._model_decision(
+            requirement,
+            selected.model_id,
+        )
         counts = self._split_candidate_count(candidate_count)
         seed = previous_plan.steps[0].seed if previous_plan and previous_plan.steps else None
         steps = [
@@ -570,6 +621,12 @@ class WorkflowPlanner:
                 num_candidates=count,
                 guidance_scale=selected.capability.default_guidance_scale,
                 seed=seed,
+                parameter_sources={
+                    **parameter_sources,
+                    "candidate_count": candidate_decision.source,
+                    "guidance_scale": "model_default",
+                    "model_id": model_decision.source,
+                },
             )
             for count in counts
         ]
@@ -583,6 +640,9 @@ class WorkflowPlanner:
                 f"每步不超过 {MAX_CANDIDATES_PER_STEP} 个。"
             )
         assumptions.extend(requirement.assumptions)
+        assumptions.extend(
+            decision.rationale for decision in objective_decisions
+        )
 
         summary = self._ready_summary(
             requirement,
@@ -602,6 +662,14 @@ class WorkflowPlanner:
             assumptions=_unique(assumptions),
             questions=[],
             steps=steps,
+            planning_decisions=[
+                candidate_decision.as_dict(),
+                model_decision.as_dict(),
+                *[
+                    decision.as_dict()
+                    for decision in objective_decisions
+                ],
+            ],
         )
 
     def _build_decision_plan(
@@ -652,6 +720,7 @@ class WorkflowPlanner:
         assumptions: list[str],
         questions: list[str],
         steps: list[PlanStep],
+        planning_decisions: Optional[list[dict[str, Any]]] = None,
     ) -> ExecutionPlan:
         return ExecutionPlan(
             plan_id=previous_plan.plan_id if previous_plan else str(uuid.uuid4()),
@@ -668,6 +737,7 @@ class WorkflowPlanner:
             capability_status=capability_status,
             decision_reasons=decision_reasons,
             candidate_models=candidate_models,
+            planning_decisions=planning_decisions or [],
             request_spec=requirement,
             steps=steps,
         )
@@ -676,7 +746,13 @@ class WorkflowPlanner:
         self,
         requirement: MaterialRequirementSpec,
         selected: CapabilityMatch,
-    ) -> tuple[dict[str, float | int | str], list[str], list[str]]:
+    ) -> tuple[
+        dict[str, float | int | str],
+        list[str],
+        list[str],
+        list[PlanningDecision],
+        dict[str, str],
+    ]:
         objectives = {
             objective.property: objective
             for objective in requirement.objectives
@@ -684,10 +760,12 @@ class WorkflowPlanner:
         conditions: dict[str, float | int | str] = {}
         missing: list[str] = []
         errors: list[str] = []
+        decisions: list[PlanningDecision] = []
+        sources: dict[str, str] = {}
 
         for property_name in selected.matched_objectives:
             objective = objectives.get(property_name)
-            if objective is None or objective.target is None:
+            if objective is None:
                 missing.append(f"{property_name}_target")
                 continue
             condition = selected.capability.objective_constraints.get(
@@ -696,32 +774,82 @@ class WorkflowPlanner:
             if condition is None:
                 errors.append(f"{property_name}_not_a_generation_condition")
                 continue
+            decision = self.planning_policy.resolve_objective(objective)
+            if (
+                decision is None
+                and objective.target is None
+                and objective.semantic_goal is None
+            ):
+                model_default = condition.get("default")
+                if model_default is not None:
+                    decision = PlanningDecision(
+                        parameter=property_name,
+                        value=model_default,
+                        source="model_default",
+                        rationale=(
+                            f"{property_name} 未指定目标，采用模型注册表中的"
+                            "文档默认值。"
+                        ),
+                    )
+            if decision is None:
+                missing.append(f"{property_name}_target")
+                continue
+            target = float(decision.value)
             constraint_error = self._validate_condition(
                 property_name,
-                objective.target,
+                target,
                 condition,
                 objective.unit,
             )
             if constraint_error:
                 errors.append(constraint_error)
                 continue
-            conditions[property_name] = objective.target
+            conditions[property_name] = target
+            sources[property_name] = decision.source
+            decisions.append(decision)
 
         for required_input in selected.capability.required_inputs:
             if required_input == "chemical_system":
                 value = requirement.composition.chemical_system
                 if value:
                     conditions["chemical_system"] = value
+                    sources["chemical_system"] = "user"
                 else:
                     missing.append("chemical_system")
             elif required_input == "space_group":
                 value = requirement.structure.space_group
                 if value is not None:
                     conditions["space_group"] = value
+                    sources["space_group"] = "user"
                 else:
                     missing.append("space_group")
 
-        return conditions, _unique(missing), _unique(errors)
+        return (
+            conditions,
+            _unique(missing),
+            _unique(errors),
+            decisions,
+            sources,
+        )
+
+    @staticmethod
+    def _model_decision(
+        requirement: MaterialRequirementSpec,
+        model_id: str,
+    ) -> PlanningDecision:
+        if model_id in requirement.model_preferences:
+            return PlanningDecision(
+                parameter="model_id",
+                value=model_id,
+                source="user",
+                rationale="模型由用户显式指定。",
+            )
+        return PlanningDecision(
+            parameter="model_id",
+            value=model_id,
+            source="derived",
+            rationale="模型由 CapabilityRegistry 能力匹配确定。",
+        )
 
     @staticmethod
     def _validate_condition(
@@ -810,6 +938,7 @@ class WorkflowPlanner:
         num_candidates: int,
         guidance_scale: float,
         seed: Optional[int],
+        parameter_sources: Optional[dict[str, str]] = None,
     ) -> PlanStep:
         objective_text = "，".join(
             f"{name}={value}" for name, value in conditions.items()
@@ -825,6 +954,7 @@ class WorkflowPlanner:
             ),
             model_id=model_id,
             conditions=conditions,
+            parameter_sources=parameter_sources or {},
             num_candidates=num_candidates,
             guidance_scale=guidance_scale,
             seed=seed,

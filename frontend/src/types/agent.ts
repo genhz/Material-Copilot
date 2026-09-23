@@ -43,6 +43,7 @@ export interface PlanObjective {
   operator: string
   target: number | null
   unit?: string | null
+  semantic_goal?: string | null
   constraint_type?: 'hard' | 'soft'
   kind: 'hard' | 'soft'
 }
@@ -61,6 +62,7 @@ export interface PlanStep {
   status: StepStatus
   model_id?: string | null
   conditions: Record<string, unknown>
+  parameter_sources: Record<string, string>
   inputs: Record<string, unknown>
   output: Record<string, unknown>
   num_candidates?: number | null
@@ -95,6 +97,12 @@ export interface ExecutionPlan {
     | 'unavailable'
   decision_reasons: string[]
   candidate_models: string[]
+  planning_decisions: Array<{
+    parameter: string
+    value: unknown
+    source: 'user' | 'model_default' | 'planning_policy' | 'derived'
+    rationale: string
+  }>
   request_spec: {
     goal: string
     material_type?: string | null

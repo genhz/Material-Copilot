@@ -184,6 +184,25 @@ const canConfirm = computed(
         </div>
       </section>
 
+      <section
+        v-if="plan.planning_decisions.length"
+        class="plan-section"
+      >
+        <h4>规划参数来源</h4>
+        <div
+          v-for="decision in plan.planning_decisions"
+          :key="`${decision.parameter}-${decision.source}`"
+          class="decision-row"
+        >
+          <span>{{ decision.parameter }}</span>
+          <strong>{{ decision.value }}</strong>
+          <el-tag size="small" effect="plain">
+            {{ decision.source }}
+          </el-tag>
+          <small>{{ decision.rationale }}</small>
+        </div>
+      </section>
+
       <el-alert
         v-for="question in plan.questions"
         :key="question"
@@ -227,6 +246,17 @@ const canConfirm = computed(
                 {{ step.model_id }}
                 <span v-if="step.num_candidates">
                   · {{ step.num_candidates }} candidates
+                </span>
+              </div>
+              <div
+                v-if="Object.keys(step.parameter_sources).length"
+                class="step-provenance"
+              >
+                <span
+                  v-for="(source, parameter) in step.parameter_sources"
+                  :key="`${step.id}-${parameter}`"
+                >
+                  {{ parameter }}: {{ source }}
                 </span>
               </div>
               <el-progress
@@ -363,6 +393,29 @@ const canConfirm = computed(
   gap: 8px;
   padding: 8px 0;
   border-bottom: 1px solid var(--el-border-color-extra-light);
+}
+
+.decision-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--el-border-color-extra-light);
+}
+
+.decision-row small {
+  grid-column: 1 / -1;
+  color: var(--el-text-color-secondary);
+}
+
+.step-provenance {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+  color: var(--el-text-color-secondary);
+  font-size: 11px;
 }
 
 .step-list {

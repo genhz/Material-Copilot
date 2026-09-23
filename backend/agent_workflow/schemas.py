@@ -36,6 +36,12 @@ CapabilityPlanningStatus = Literal[
     "unsupported",
     "unavailable",
 ]
+ParameterSource = Literal[
+    "user",
+    "model_default",
+    "planning_policy",
+    "derived",
+]
 
 
 class ObjectiveSpec(BaseModel):
@@ -45,6 +51,7 @@ class ObjectiveSpec(BaseModel):
     operator: ObjectiveOperator = ">="
     target: Optional[float] = None
     unit: Optional[str] = None
+    semantic_goal: Optional[str] = None
     constraint_type: ConstraintType = "soft"
     priority: Optional[int] = None
 
@@ -197,6 +204,7 @@ class PlanStep(BaseModel):
     status: StepStatus = StepStatus.PENDING
     model_id: Optional[str] = None
     conditions: dict[str, Any] = Field(default_factory=dict)
+    parameter_sources: dict[str, ParameterSource] = Field(default_factory=dict)
     inputs: dict[str, Any] = Field(default_factory=dict)
     output: dict[str, Any] = Field(default_factory=dict)
     num_candidates: Optional[int] = None
@@ -234,6 +242,7 @@ class ExecutionPlan(BaseModel):
     capability_status: CapabilityPlanningStatus = "ready"
     decision_reasons: list[str] = Field(default_factory=list)
     candidate_models: list[str] = Field(default_factory=list)
+    planning_decisions: list[dict[str, Any]] = Field(default_factory=list)
     request_spec: MaterialRequirementSpec
     steps: list[PlanStep]
     created_at: datetime = Field(

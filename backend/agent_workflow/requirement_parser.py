@@ -41,8 +41,8 @@ REQUIREMENT_PARSER_PROMPT = """你是材料 AI 平台的需求解析器。
    体积模量或其他相似性质。
 8. 用户给出了性质但没有给出数值时，在 missing_information 中记录。
 9. 用户提出了当前平台不支持的性质时，在 unsupported_requirements 中记录。
-10. 用户没有明确数量时，可以按平台默认 candidate_count=2，并记录
-    candidate_count_defaulted_to_2；不要修改用户明确给出的数量。
+10. 用户没有明确数量时，candidate_count 保持 null，由 PlanningPolicy 决定；
+    不要修改用户明确给出的数量。
 11. 只有用户明确提到模型名称时，才写入 model_preferences；不要验证其可用性。
 12. application 只是上下文，不能据此增加用户没有提出的性能目标。
 
@@ -53,6 +53,11 @@ REQUIREMENT_PARSER_PROMPT = """你是材料 AI 平台的需求解析器。
 - 带隙 -> dft_band_gap
 - 体积模量 -> ml_bulk_modulus
 - 空间群 -> structure.space_group
+
+语义目标示例：
+- 较稳定 -> semantic_goal = stable
+- 更严格稳定 -> semantic_goal = strict_stable
+- 较宽松稳定 -> semantic_goal = relaxed_stable
 
 任务类型只能是：
 material_generation、material_lookup、element_substitution、
@@ -512,6 +517,34 @@ def _constraint_type(text: str) -> str:
     return "soft"
 
 
+def _semantic_goal(
+    property_name: str,
+    text: str,
+    target: Optional[float],
+) -> Optional[str]:
+    if target is not None:
+        return "explicit_target"
+    if property_name == "energy_above_hull":
+        if any(
+            cue in text
+            for cue in ("更严格", "非常稳定", "高度稳定", "严格稳定")
+        ):
+            return "strict_stable"
+        if any(cue in text for cue in ("宽松", "稍微稳定")):
+            return "relaxed_stable"
+        if any(cue in text for cue in ("较稳定", "稳定", "stable")):
+            return "stable"
+    if property_name == "dft_mag_density" and any(
+        cue in text for cue in ("高磁", "磁性高", "high magnetic")
+    ):
+        return "high_magnetic_density"
+    if property_name == "hhi_score" and any(
+        cue in text for cue in ("低供应风险", "供应风险低", "low supply risk")
+    ):
+        return "low_supply_risk"
+    return None
+
+
 def _extract_supported_objectives(text: str) -> list[ObjectiveSpec]:
     lowered = text.lower()
     objectives: list[ObjectiveSpec] = []
@@ -525,6 +558,11 @@ def _extract_supported_objectives(text: str) -> list[ObjectiveSpec]:
                 target=target,
                 operator=_extract_operator(text, property_name, target),
                 unit=TARGET_UNITS.get(property_name),
+                semantic_goal=_semantic_goal(
+                    property_name,
+                    text,
+                    target,
+                ),
                 constraint_type=_constraint_type(text),
                 priority=1 if "优先" in text or "首要" in text else None,
             )
@@ -739,9 +777,6 @@ def parse_requirement_deterministically(
 
     candidate_count = _extract_candidate_count(text)
     assumptions: list[str] = []
-    if task_type == "material_generation" and candidate_count is None:
-        candidate_count = 2
-        assumptions.append("candidate_count_defaulted_to_2")
 
     missing_information: list[str] = []
     if task_type == "clarification":
@@ -914,9 +949,6 @@ def _finalize_requirement_spec(
         data["task_type"] = "clarification"
 
     if data["task_type"] == "material_generation":
-        if spec.candidate_count is None:
-            data["candidate_count"] = 2
-            assumptions.append("candidate_count_defaulted_to_2")
         for objective in spec.objectives:
             if (
                 objective.property in SUPPORTED_PROPERTY_ALIASES
@@ -1171,6 +1203,24 @@ class RequirementParser:
                     objective["target"] = float(number_match.group(1))
                     objective["unit"] = expected_unit
                     objectives[property_name] = objective
+
+        stability_objective = objectives.get("energy_above_hull")
+        if stability_objective and any(
+            cue in instruction
+            for cue in ("严格一点", "更严格", "再稳定一点", "更稳定")
+        ):
+            stability_objective = dict(stability_objective)
+            stability_objective["target"] = None
+            stability_objective["semantic_goal"] = "strict_stable"
+            objectives["energy_above_hull"] = stability_objective
+        elif stability_objective and any(
+            cue in instruction
+            for cue in ("宽松一点", "不用太严格")
+        ):
+            stability_objective = dict(stability_objective)
+            stability_objective["target"] = None
+            stability_objective["semantic_goal"] = "relaxed_stable"
+            objectives["energy_above_hull"] = stability_objective
         data["objectives"] = list(objectives.values())
 
         composition = dict(data["composition"])

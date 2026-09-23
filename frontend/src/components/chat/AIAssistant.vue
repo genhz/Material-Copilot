@@ -117,6 +117,13 @@ watch(workflowResult, (result) => {
   if (!result || result === handledWorkflowResult) return
   handledWorkflowResult = result
   if (
+    result.material_data &&
+    result.task_type !== 'material_generation'
+  ) {
+    emit('materialFound', result.material_data, 'render')
+    return
+  }
+  if (
     result.task_type === 'material_generation' ||
     result.candidate_count > 0
   ) {

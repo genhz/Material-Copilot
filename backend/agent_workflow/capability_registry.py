@@ -85,6 +85,24 @@ class CapabilityMatch:
     def model_id(self) -> str:
         return self.capability.model_id
 
+    @property
+    def supports(self) -> dict[str, bool]:
+        """Expose inspectable capability evidence to planning policy code."""
+
+        evidence = {
+            property_name: property_name in self.matched_objectives
+            for property_name in self.capability.supported_properties
+        }
+        evidence.update(
+            {
+                "chemical_system": self.capability.supports_composition,
+                "space_group": self.capability.supports_space_group,
+                "exact_formula": self.capability.supports_exact_formula,
+                "crystal_system": self.capability.supports_crystal_system,
+            }
+        )
+        return evidence
+
 
 @dataclass(frozen=True)
 class CapabilityDecision:
