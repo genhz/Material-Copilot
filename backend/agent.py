@@ -19,21 +19,13 @@ os.environ.setdefault(
 )
 
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, BaseMessage
+from langchain_core.messages import HumanMessage, AIMessage
 from langgraph.prebuilt import create_react_agent
 
 from skills.material_search import MaterialSearchTool, MaterialSearchResult
 from skills.chat import ChatTool
 from skills.element_substitution import ElementSubstitutionTool
 from skills.material_generation import MaterialGenerationTool
-from generation.manager import get_generation_manager
-from generation.model_registry import list_model_specs
-from generation.schemas import (
-    CampaignRequest,
-    CampaignRunRequest,
-    GenerationRequest,
-)
-from intent.classifier import IntentClassifier
 from config import get_llm_config
 
 logger = logging.getLogger(__name__)
@@ -69,7 +61,6 @@ class MaterialAgent:
         self._llm: Optional[ChatOpenAI] = None
         self._agent = None
         self._tools = None
-        self._intent_classifier: Optional[IntentClassifier] = None
 
     @property
     def llm(self) -> ChatOpenAI:
@@ -99,12 +90,6 @@ class MaterialAgent:
         return self._tools
 
     @property
-    def intent_classifier(self) -> IntentClassifier:
-        if self._intent_classifier is None:
-            self._intent_classifier = IntentClassifier(self.llm)
-        return self._intent_classifier
-
-    @property
     def agent(self):
         """懒加载 Agent"""
         if self._agent is None:
@@ -131,42 +116,6 @@ class MaterialAgent:
         Returns:
             AgentResult: Agent 执行结果
         """
-        try:
-            decision = await self.intent_classifier.classify(message, history)
-        except Exception as exc:
-            logger.warning("Intent routing skipped: %s", exc)
-            decision = None
-
-        if decision is not None:
-            logger.info(
-                "[Intent] intent=%s confidence=%.2f clarification=%s",
-                decision.intent,
-                decision.confidence,
-                decision.needs_clarification,
-            )
-
-        if (
-            decision
-            and decision.intent == "material_generation"
-            and decision.confidence >= 0.75
-        ):
-            if decision.campaign_requested:
-                return await self._start_campaign(decision)
-            return await self._start_generation(message, decision)
-
-        if decision and (
-            decision.intent == "clarification" or decision.needs_clarification
-        ):
-            return AgentResult(
-                reply=(
-                    decision.clarification_question
-                    or "请再说明你希望寻找的材料目标，我可以继续为你设计候选。"
-                ),
-                action="chat",
-                material_data=None,
-                job_id=None,
-            )
-
         # 构建消息历史
         messages = []
 
@@ -258,99 +207,6 @@ class MaterialAgent:
                 material_data=None,
                 job_id=None,
             )
-
-    async def _start_generation(self, message: str, decision) -> "AgentResult":
-        manager = get_generation_manager()
-        await manager.startup()
-        request = GenerationRequest(
-            model_id=decision.model_id,
-            conditions=decision.conditions,
-            num_candidates=decision.num_candidates or 2,
-            guidance_scale=decision.guidance_scale,
-            seed=decision.seed,
-        )
-
-        try:
-            job = await manager.submit(request)
-        except Exception as exc:
-            logger.exception("Unable to start material generation")
-            return AgentResult(
-                reply=f"暂时无法创建材料生成任务：{exc}",
-                action="chat",
-                material_data=None,
-                job_id=None,
-            )
-
-        return AgentResult(
-            reply=(
-                f"已开始使用“{job.model_label or job.model_id}”生成 "
-                f"{job.request.num_candidates} 个材料候选。"
-                "生成过程会在候选面板中实时显示。"
-            ),
-            action="generate",
-            material_data=None,
-            job_id=job.job_id,
-        )
-
-    async def _start_campaign(self, decision) -> "AgentResult":
-        manager = get_generation_manager()
-        await manager.startup()
-
-        runs: list[CampaignRunRequest] = []
-        for spec in list_model_specs():
-            conditions = {
-                name: condition.default
-                for name, condition in spec.conditions.items()
-                if condition.default is not None
-            }
-            if spec.model_id == "dft_mag_density" and decision.target_magnetic_density:
-                conditions["dft_mag_density"] = decision.target_magnetic_density
-            if spec.model_id == "dft_mag_density_hhi_score":
-                if decision.target_magnetic_density:
-                    conditions["dft_mag_density"] = (
-                        decision.target_magnetic_density
-                    )
-                if decision.hhi_score is not None:
-                    conditions["hhi_score"] = decision.hhi_score
-
-            runs.append(
-                CampaignRunRequest(
-                    model_id=spec.model_id,
-                    conditions=conditions,
-                    num_candidates=1,
-                    guidance_scale=spec.default_guidance_scale,
-                    seed=decision.seed,
-                )
-            )
-
-        try:
-            campaign = await manager.submit_campaign(
-                CampaignRequest(
-                    name="多模型材料探索",
-                    runs=runs,
-                    max_concurrency=1,
-                )
-            )
-        except Exception as exc:
-            logger.exception("Unable to start generation campaign")
-            return AgentResult(
-                reply=f"暂时无法创建多模型生成任务：{exc}",
-                action="chat",
-                material_data=None,
-                job_id=None,
-            )
-
-        return AgentResult(
-            reply=(
-                f"已创建多模型探索任务，共包含 {len(runs)} 个模型。"
-                "任务会按顺序执行，并在候选面板中汇总结果。"
-            ),
-            action="campaign",
-            material_data=None,
-            job_id=None,
-            campaign_id=campaign.campaign_id,
-        )
-
 
 class AgentResult:
     """Agent 执行结果"""

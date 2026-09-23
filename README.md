@@ -17,7 +17,7 @@
 ## ✨ 功能
 
 - 🔍 **Materials Project 查询**：材料检索和物性展示
-- 💬 **自然语言交互**：语义意图识别与 LangChain Agent
+- 💬 **自然语言交互**：Reasoning Agent 的 Thought / Tool / Plan / Reflection 循环
 - 🧩 **元素替换**：元素替代和掺杂
 - 🧪 **MatterGen 模型**：九种预训练模型统一路由
 - 🚀 **多模型探索**：单模型生成和多模型顺序 Campaign
@@ -120,7 +120,7 @@ npm run dev
 ```text
 查看 Nd2Fe14B 的晶体结构
 把 Nd2Fe14B 中的 Fe 替换成 Co
-帮我设计两个高磁密度磁性材料候选
+生成 Nd-Fe-B 中较稳定且高磁的候选
 生成高磁密度且低供应风险的磁性材料
 设计 Nd-Fe-B 体系中的稳定材料
 生成带隙约 1.5 eV 的材料
@@ -154,7 +154,8 @@ WS   /api/ws
 material-sandbox/
 ├── backend/
 │   ├── agent.py
-│   ├── intent/              # 语义意图路由
+│   ├── agent_runtime/       # ReAct、Memory、ToolRegistry、Reflection
+│   ├── intent/              # 旧意图分类兼容层（非主入口）
 │   ├── skills/              # LangChain Tools
 │   ├── generation/          # 模型注册、任务、Worker、Campaign
 │   ├── realtime/            # WebSocket 网关

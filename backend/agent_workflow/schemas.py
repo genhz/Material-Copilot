@@ -40,6 +40,8 @@ ParameterSource = Literal[
     "user",
     "model_default",
     "planning_policy",
+    "agent_suggestion",
+    "memory",
     "derived",
 ]
 
@@ -192,7 +194,9 @@ class PlanStep(BaseModel):
 
     id: str
     kind: Literal[
+        "ask",
         "generate",
+        "evaluate",
         "filter",
         "rank",
         "material_lookup",
@@ -221,6 +225,8 @@ class PlanStep(BaseModel):
     retry_delay_seconds: float = Field(default=0.0, ge=0.0, le=30.0)
     produces_candidates: bool = False
     requires_candidates: bool = False
+    question: Optional[str] = None
+    suggestion: Optional[dict[str, Any]] = None
 
     def transition(self, target: StepStatus) -> None:
         target = StepStatus(target)
@@ -243,6 +249,8 @@ class ExecutionPlan(BaseModel):
     decision_reasons: list[str] = Field(default_factory=list)
     candidate_models: list[str] = Field(default_factory=list)
     planning_decisions: list[dict[str, Any]] = Field(default_factory=list)
+    reasoning_trace: list[dict[str, Any]] = Field(default_factory=list)
+    reflection: Optional[str] = None
     request_spec: MaterialRequirementSpec
     steps: list[PlanStep]
     created_at: datetime = Field(

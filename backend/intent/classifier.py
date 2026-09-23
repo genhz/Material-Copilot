@@ -1,4 +1,4 @@
-"""Classify user intent without requiring MatterGen-specific vocabulary."""
+"""Deprecated compatibility classifier; not used by the main agent runtime."""
 
 from __future__ import annotations
 

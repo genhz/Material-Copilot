@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from agent_runtime.react_agent import ReActAgent
 from agent_workflow.planner import WorkflowPlanner
 from agent_workflow.requirement_parser import RequirementParser
 from agent_workflow.schemas import (
@@ -59,6 +60,7 @@ class AgentWorkflowService:
         self._sessions: dict[str, AgentSessionState] = {}
         self._planner = None
         self._requirement_parser = None
+        self._agent_runtime: Optional[ReActAgent] = None
 
     @property
     def planner(self) -> WorkflowPlanner:
@@ -68,9 +70,17 @@ class AgentWorkflowService:
 
     @property
     def requirement_parser(self) -> RequirementParser:
+        """Deprecated compatibility hook; not used by the main message path."""
+
         if self._requirement_parser is None:
             self._requirement_parser = RequirementParser()
         return self._requirement_parser
+
+    @property
+    def agent_runtime(self) -> ReActAgent:
+        if self._agent_runtime is None:
+            self._agent_runtime = ReActAgent()
+        return self._agent_runtime
 
     def _session(self, session_id: str) -> AgentSessionState:
         state = self._sessions.get(session_id)
@@ -122,6 +132,9 @@ class AgentWorkflowService:
         state = self._session(session_id)
         return {
             "messages": state.messages,
+            "memory": self.agent_runtime.memory_store.get(
+                session_id
+            ).context(),
             "plan": (
                 state.current_plan.model_dump(mode="json")
                 if state.current_plan
@@ -151,18 +164,39 @@ class AgentWorkflowService:
         await self.publish(
             session_id,
             "assistant.delta",
-            {"content": "正在解析材料范围、元素约束和性能目标。\n"},
+            {"content": "正在推理由材料目标到工具链的执行计划。\n"},
         )
 
-        requirement = await self.requirement_parser.parse(
+        result = await self.agent_runtime.handle(
             message,
-            history=state.messages[-12:],
-        )
-        plan = self.planner.plan(
             session_id=session_id,
-            requirement=requirement,
-            original_message=message,
+            history=state.messages[-13:-1],
         )
+        for step in result.trace:
+            await self.publish(
+                session_id,
+                "agent.reasoning",
+                {
+                    "thought": step.thought,
+                    "action": step.action,
+                    "arguments": step.arguments,
+                    "observation": step.observation,
+                    "confidence": step.confidence,
+                },
+            )
+
+        plan = result.plan
+        if plan is None:
+            state.messages.append(
+                {"role": "assistant", "content": result.response}
+            )
+            await self.publish(
+                session_id,
+                "assistant.completed",
+                {"message": result.response},
+            )
+            return
+
         state.current_plan = plan
         completion_message = self._planning_message(plan)
         state.messages.append(
@@ -215,17 +249,23 @@ class AgentWorkflowService:
             {"role": "user", "content": f"修改执行计划：{instruction}"}
         )
         await self.publish(session_id, "plan.revising", {"plan_id": plan_id})
-        revised_requirement = await self.requirement_parser.parse_revision(
-            revision_text=instruction,
-            previous_requirement=plan.request_spec,
+        result = await self.agent_runtime.revise(
+            session_id=session_id,
+            previous_plan=plan,
+            instruction=instruction,
             history=state.messages[-12:],
         )
-        revised = self.planner.plan(
-            session_id=session_id,
-            requirement=revised_requirement,
-            original_message=plan.original_message,
-            previous_plan=plan,
-        )
+        revised = result.plan
+        if revised is None:
+            await self.publish(
+                session_id,
+                "error",
+                {
+                    "code": "PLAN_REVISION_FAILED",
+                    "message": result.response,
+                },
+            )
+            return
         state.current_plan = revised
         await self.publish(
             session_id,
@@ -280,6 +320,7 @@ class AgentWorkflowService:
             return
 
         plan.transition(PlanStatus.CONFIRMED)
+        self.agent_runtime.memory_store.get(session_id).confirm_plan(plan)
         workflow = WorkflowRunState(
             workflow_id=str(uuid.uuid4()),
             plan_id=plan.plan_id,
@@ -341,6 +382,7 @@ class AgentWorkflowService:
         state.workflow = None
         state.events.clear()
         state.sequence = 0
+        self.agent_runtime.memory_store.clear(session_id)
         await self.publish(session_id, "agent.cleared")
 
     async def _execute_plan(
@@ -465,6 +507,24 @@ class AgentWorkflowService:
                     return
 
                 if step.kind != "generate":
+                    if step.kind == "ask":
+                        step.output = {
+                            "status": "confirmed",
+                            "suggestion": step.suggestion,
+                            "inputs": step.inputs,
+                        }
+                    elif step.kind == "evaluate":
+                        step.output = {
+                            "status": "observation_pending",
+                            "property": step.inputs.get("property"),
+                            "operator": step.inputs.get("operator"),
+                            "target": step.inputs.get("target"),
+                        }
+                    elif step.kind == "rank":
+                        step.output = {
+                            "status": "ranked",
+                            "objectives": step.inputs.get("objectives", []),
+                        }
                     step.transition(StepStatus.COMPLETED)
                     step.progress = 1.0
                     await self.publish(

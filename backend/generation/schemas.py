@@ -78,22 +78,38 @@ class GenerationRequest(BaseModel):
         if self.model_id:
             return self.model_id
 
+        from generation.model_registry import list_model_specs
+
         keys = set(self._input_conditions())
-        if {"chemical_system", "energy_above_hull"} <= keys:
-            return "chemical_system_energy_above_hull"
-        if {"dft_mag_density", "hhi_score"} <= keys:
-            return "dft_mag_density_hhi_score"
-        if "chemical_system" in keys:
-            return "chemical_system"
-        if "dft_mag_density" in keys:
-            return "dft_mag_density"
-        if "dft_band_gap" in keys:
-            return "dft_band_gap"
-        if "ml_bulk_modulus" in keys:
-            return "ml_bulk_modulus"
-        if "space_group" in keys:
-            return "space_group"
-        return "dft_mag_density"
+        specs = list_model_specs()
+        exact = [
+            spec for spec in specs if set(spec.conditions) == keys
+        ]
+        if exact:
+            return exact[0].model_id
+
+        covering = [
+            spec for spec in specs if keys.issubset(spec.conditions)
+        ]
+        if covering:
+            covering.sort(
+                key=lambda spec: (
+                    len(set(spec.conditions) - keys),
+                    len(spec.required_inputs),
+                )
+            )
+            return covering[0].model_id
+
+        if not keys:
+            unconditional = [
+                spec for spec in specs if not spec.conditions
+            ]
+            if unconditional:
+                return unconditional[0].model_id
+
+        raise ValueError(
+            "无法根据 conditions 匹配唯一 MatterGen 模型"
+        )
 
     def resolved_conditions(self) -> dict[str, ConditionValue]:
         from generation.model_registry import get_model_spec
@@ -157,7 +173,7 @@ class GenerationJob(BaseModel):
     progress: float = Field(default=0.0, ge=0.0, le=1.0)
     message: Optional[str] = None
     sequence: int = 0
-    model_id: str = "dft_mag_density"
+    model_id: str = ""
     model_label: Optional[str] = None
     request: GenerationRequest
     created_at: datetime

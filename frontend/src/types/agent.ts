@@ -51,7 +51,9 @@ export interface PlanObjective {
 export interface PlanStep {
   id: string
   kind:
+    | 'ask'
     | 'generate'
+    | 'evaluate'
     | 'filter'
     | 'rank'
     | 'material_lookup'
@@ -62,7 +64,15 @@ export interface PlanStep {
   status: StepStatus
   model_id?: string | null
   conditions: Record<string, unknown>
-  parameter_sources: Record<string, string>
+  parameter_sources: Record<
+    string,
+    | 'user'
+    | 'model_default'
+    | 'planning_policy'
+    | 'agent_suggestion'
+    | 'memory'
+    | 'derived'
+  >
   inputs: Record<string, unknown>
   output: Record<string, unknown>
   num_candidates?: number | null
@@ -79,6 +89,8 @@ export interface PlanStep {
   retry_delay_seconds: number
   produces_candidates: boolean
   requires_candidates: boolean
+  question?: string | null
+  suggestion?: Record<string, unknown> | null
 }
 
 export interface ExecutionPlan {
@@ -100,9 +112,17 @@ export interface ExecutionPlan {
   planning_decisions: Array<{
     parameter: string
     value: unknown
-    source: 'user' | 'model_default' | 'planning_policy' | 'derived'
+    source:
+      | 'user'
+      | 'model_default'
+      | 'planning_policy'
+      | 'agent_suggestion'
+      | 'memory'
+      | 'derived'
     rationale: string
   }>
+  reasoning_trace?: Array<Record<string, unknown>>
+  reflection?: string | null
   request_spec: {
     goal: string
     material_type?: string | null

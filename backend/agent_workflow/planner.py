@@ -1,4 +1,4 @@
-"""Create editable workflows from structured requirements and capabilities."""
+"""Deprecated compatibility planner; the main path uses agent_runtime."""
 
 from __future__ import annotations
 

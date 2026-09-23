@@ -1,22 +1,48 @@
-# 后端文档 - LangChain Agent 架构
+# 后端文档 - Reasoning Agent 架构
 
 ## 架构说明
 
-本项目使用 **LangChain ReAct Agent** 实现智能意图识别和工具调用。
+主聊天链路使用 `agent_runtime` 中的 Reasoning Agent：
+
+```text
+User
+  ↓
+Thought → Action → Observation → Reflection
+  ↓
+ExecutionPlan
+  ↓
+用户确认
+  ↓
+现有 Workflow State Machine / GenerationManager / MatterGen Worker
+```
+
+LLM 每轮只返回结构化 JSON：
+
+```json
+{
+  "thought": "分析用户需求",
+  "action": "choose_tool",
+  "arguments": {},
+  "confidence": 0.9
+}
+```
 
 ### 原架构 vs 新架构
 
-| 原架构 | 新架构 (LangChain) |
+| 原架构 | 新架构 |
 |--------|-------------------|
-| `router.py` - 意图分类器 | Agent 自动判断意图 |
-| `workflow.py` - 工作流调度 | LangGraph ReAct Agent |
-| `skills/*.py` | LangChain Tools |
+| `IntentClassifier` 作为主入口 | `ReActAgent` 根据 Thought/Observation 选择工具 |
+| `RequirementParser.extract_semantics` | LLM 推理 + `AgentToolExecutor` |
+| 大量 `if/elif` 模型选择 | `ToolRegistry` 动态匹配能力 |
+| Planner 内硬编码 `model_id` | 按能力覆盖和运行可用性选择工具 |
+| 缺参直接 clarification | 生成带 `ask` 步骤和参数建议的 `ExecutionPlan` |
 
 ### 新架构优势
 
-1. **更简洁**: 不再需要手动编写 Router 分类逻辑
-2. **更灵活**: 可以轻松添加新工具
-3. **更符合 Agent 范式**: 使用 LangGraph 的 ReAct 模式
+1. **可观察**: Thought、Action、Observation、Reflection 都保留在 trace 中
+2. **可修订**: Agent Memory 保存体系、确认参数、历史目标和历史工具选择
+3. **可扩展**: 新能力进入 `CapabilityRegistry` 后自动出现在 `ToolRegistry`
+4. **安全执行**: Agent 只生成 `ExecutionPlan`，成本高的生成仍由用户确认后执行
 
 ## 文件结构
 
@@ -25,6 +51,13 @@ backend/
 ├── .venv/               # Python 3.10 统一环境
 ├── main.py              # FastAPI 入口
 ├── agent.py             # LangChain Agent 封装
+├── agent_runtime/
+│   ├── react_agent.py   # Thought/Action/Observation/Reflection 循环
+│   ├── memory.py        # 体系、参数、目标、工具选择记忆
+│   ├── tool_registry.py # capability、输入、建议值、运行可用性
+│   ├── planner.py       # 能力驱动 ExecutionPlan
+│   ├── executor.py      # planning-time tool call
+│   └── reflection.py    # reflection / replan
 ├── config.py            # LLM 配置管理
 ├── skills/
 │   ├── __init__.py
@@ -127,27 +160,64 @@ print(f"API Key: {config.api_key}")   # e.g. "sk-..."
 | `MATTERGEN_CUDA_ALLOC_CONF` | CUDA 显存分配策略，推荐 `expandable_segments:True` |
 | `MATTERGEN_TORCH_MATMUL_PRECISION` | FP32 矩阵计算精度，Ampere 显卡推荐 `high` |
 
-## 语义意图路由
+## ToolRegistry
 
-`backend/intent/` 提供结构化意图分类：
+每个工具向推理层暴露统一契约：
 
-```text
-science_chat
-material_lookup
-element_substitution
-material_generation
-clarification
+```json
+{
+  "name": "chemical_system_energy_above_hull",
+  "capability": "material_generation",
+  "required_inputs": ["chemical_system"],
+  "optional_inputs": ["energy_above_hull"],
+  "runtime_availability": true,
+  "default_suggestions": {
+    "energy_above_hull": {
+      "operator": "<=",
+      "value": 0.05,
+      "unit": "eV/atom"
+    }
+  }
+}
 ```
 
-高置信度生成请求会直接创建生成任务，不再完全依赖 ReAct Agent 自行选择工具。用户不需要知道 MatterGen，例如：
+生成工具由 `CapabilityRegistry` 和 `generation.model_registry` 动态生成。增加新 MatterGen checkpoint 后，不需要在 Agent planner 中增加新的 `if/elif`。
+
+## 缺参计划
+
+如果目标参数来自系统建议，Agent 不直接发送不可执行的 clarification，而是生成：
 
 ```text
-帮我设计几种新的磁性材料
-给我一些还没有被材料库收录的候选结构
-想做高磁化强度材料，给我几个可能性
+Step 1 Ask:
+  energy_above_hull <= 0.05 eV/atom
+
+Step 2 Generate:
+  chemical_system_energy_above_hull
 ```
 
-模糊请求会返回澄清问题，低置信度或复杂请求才交给 Agent 处理。
+用户确认计划即表示接受建议值。若没有可执行工具，计划会保留 Ask 步骤并标记为不可确认。
+
+## Agent Memory
+
+每个 session 记录：
+
+```text
+current_research_system
+confirmed_parameters
+historical_goals
+model_history
+```
+
+因此支持上下文化修订，例如：
+
+```text
+生成 8 个磁密度约 0.2 的材料
+再提高一点磁密度
+```
+
+第二轮会基于历史值生成 `dft_mag_density >= 0.22` 的新计划。
+
+`backend/intent/` 和旧 `RequirementParser`/`WorkflowPlanner` 暂时保留用于兼容和既有测试，但不是主聊天链路入口。
 
 ## LangChain 核心概念
 

@@ -1,4 +1,4 @@
-"""Natural-language requirement parsing without model selection."""
+"""Deprecated compatibility parser; the main path uses agent_runtime."""
 
 from __future__ import annotations
 
