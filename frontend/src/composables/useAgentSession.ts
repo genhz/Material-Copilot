@@ -11,6 +11,7 @@ import type {
   PlanStep,
   WorkflowRunState,
 } from '../types/agent'
+import { createUuid } from '../utils/uuid'
 
 const messages = ref<AgentMessage[]>([])
 const currentPlan = ref<ExecutionPlan | null>(null)
@@ -18,7 +19,7 @@ const workflow = ref<WorkflowRunState | null>(null)
 const isPlanning = ref(false)
 const lastResult = ref<AgentResultEvent | null>(null)
 const sessionId = ref(
-  localStorage.getItem('material_agent_session_id') || crypto.randomUUID()
+  localStorage.getItem('material_agent_session_id') || createUuid()
 )
 
 localStorage.setItem('material_agent_session_id', sessionId.value)
@@ -251,7 +252,7 @@ function handleSocketReconnect() {
     action: 'agent.snapshot',
     session_id: sessionId.value,
     last_sequence: lastSequence,
-    request_id: crypto.randomUUID(),
+    request_id: createUuid(),
   })
 }
 
@@ -280,7 +281,7 @@ function sendMessage(text: string) {
     action: 'agent.message',
     session_id: sessionId.value,
     message: content,
-    request_id: crypto.randomUUID(),
+    request_id: createUuid(),
   })
   isPlanning.value = true
 }
@@ -292,7 +293,7 @@ function confirmPlan() {
     session_id: sessionId.value,
     plan_id: currentPlan.value.plan_id,
     revision: currentPlan.value.revision,
-    request_id: crypto.randomUUID(),
+    request_id: createUuid(),
   })
 }
 
@@ -311,7 +312,7 @@ function revisePlan(instruction: string) {
     plan_id: currentPlan.value.plan_id,
     revision: currentPlan.value.revision,
     message: content,
-    request_id: crypto.randomUUID(),
+    request_id: createUuid(),
   })
   isPlanning.value = true
 }
@@ -320,7 +321,7 @@ function cancelWorkflow() {
   socketApi?.send({
     action: 'agent.cancel',
     session_id: sessionId.value,
-    request_id: crypto.randomUUID(),
+    request_id: createUuid(),
   })
 }
 
@@ -328,7 +329,7 @@ function clearSession() {
   socketApi?.send({
     action: 'agent.clear',
     session_id: sessionId.value,
-    request_id: crypto.randomUUID(),
+    request_id: createUuid(),
   })
   messages.value = []
   currentPlan.value = null

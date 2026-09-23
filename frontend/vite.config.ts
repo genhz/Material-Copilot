@@ -5,6 +5,7 @@ export default defineConfig({
   plugins: [vue()],
   server: {
     port: 5173,
+    host: '0.0.0.0',
     strictPort: true, // 端口被占用时直接报错，不自动切换
     proxy: {
       '/api': {

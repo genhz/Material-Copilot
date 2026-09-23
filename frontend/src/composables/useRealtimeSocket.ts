@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { createUuid } from '../utils/uuid'
 
 export interface RealtimeMessage {
   type: string
@@ -65,7 +66,7 @@ export function useRealtimeSocket(
       action: 'subscribe',
       channel,
       resource_id: resourceId,
-      request_id: crypto.randomUUID(),
+      request_id: createUuid(),
     })
   }
 
@@ -76,7 +77,7 @@ export function useRealtimeSocket(
       action: 'unsubscribe',
       channel,
       resource_id: resourceId,
-      request_id: crypto.randomUUID(),
+      request_id: createUuid(),
     })
   }
 
@@ -113,11 +114,11 @@ export function useRealtimeSocket(
         send({
           action: 'subscribe',
           ...subscription,
-          request_id: crypto.randomUUID(),
+          request_id: createUuid(),
         })
       }
       heartbeatTimer = setInterval(() => {
-        send({ action: 'ping', request_id: crypto.randomUUID() })
+        send({ action: 'ping', request_id: createUuid() })
       }, 20000)
       onReconnect?.()
     }
