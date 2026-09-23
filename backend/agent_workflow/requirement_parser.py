@@ -16,9 +16,9 @@ from agent_workflow.schemas import (
     ObjectiveSpec,
     StructureSpec,
 )
-from agent_workflow.semantics import (
+from agent_workflow.normalization import (
     ELEMENT_ALIASES,
-    _extract_requested_elements,
+    extract_requested_elements,
 )
 from config import get_llm_config
 
@@ -281,7 +281,7 @@ def _extract_composition(text: str) -> CompositionSpec:
         chemical_system.split("-") if chemical_system else []
     )
 
-    required_elements = _extract_requested_elements(text)
+    required_elements = extract_requested_elements(text)
     for marker in ("必须包含", "必须含", "包含", "含有", "含"):
         start = text.find(marker)
         if start < 0:

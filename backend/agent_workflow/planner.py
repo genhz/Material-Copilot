@@ -14,11 +14,10 @@ from agent_workflow.capability_registry import (
 from agent_workflow.schemas import (
     CapabilityPlanningStatus,
     ExecutionPlan,
-    MaterialRequestSpec,
     MaterialRequirementSpec,
     PlanStep,
 )
-from agent_workflow.semantics import RARE_EARTH_ELEMENTS
+from agent_workflow.normalization import RARE_EARTH_ELEMENTS
 
 
 MAX_CANDIDATES_PER_STEP = 16
@@ -549,40 +548,6 @@ class WorkflowPlanner:
             steps=[step],
         )
 
-    async def propose(
-        self,
-        *,
-        session_id: str,
-        message: str,
-        history: Optional[Sequence[dict]] = None,
-        previous_plan: Optional[ExecutionPlan] = None,
-        revision_instruction: Optional[str] = None,
-    ) -> Optional[ExecutionPlan]:
-        """Compatibility entry for callers that still provide raw text."""
-
-        from agent_workflow.semantics import extract_semantics
-        from intent.classifier import _heuristic_decision
-
-        combined_text = message
-        if revision_instruction:
-            combined_text = f"{message}\n用户修改要求：{revision_instruction}"
-        decision = _heuristic_decision(combined_text)
-        if decision and decision.intent != "material_generation":
-            return None
-        if decision is None and not any(
-            cue in combined_text
-            for cue in ("生成", "设计", "探索", "候选", "新材料", "新型材料")
-        ):
-            return None
-
-        requirement = extract_semantics(combined_text)
-        return self.plan(
-            session_id=session_id,
-            requirement=requirement,
-            original_message=message,
-            previous_plan=previous_plan,
-        )
-
     def _build_ready_plan(
         self,
         *,
@@ -965,21 +930,3 @@ class WorkflowPlanner:
         requirement: MaterialRequirementSpec,
     ) -> str:
         return "结构化材料需求"
-
-    def _build_steps(
-        self,
-        spec: MaterialRequestSpec,
-        *,
-        target_count: int,
-        seed: Optional[int],
-        decision=None,
-    ) -> list[PlanStep]:
-        """Compatibility helper for callers that already built a requirement."""
-
-        requirement = spec.model_copy(
-            update={"candidate_count": target_count}
-        )
-        return self.plan(
-            session_id="compatibility",
-            requirement=requirement,
-        ).steps

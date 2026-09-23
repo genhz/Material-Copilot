@@ -9,33 +9,12 @@ from agent_workflow.schemas import (
     WorkflowRunState,
 )
 from agent_workflow.service import AgentWorkflowService
-from agent_workflow.semantics import extract_semantics
 from agent_workflow.state import (
     PlanStatus,
     StepStatus,
     WorkflowStatus,
 )
 from main import app
-
-
-def test_semantics_extract_nd_fe_magnetic_request() -> None:
-    spec = extract_semantics("请探索钕铁合金磁性性能较优的晶体结构")
-
-    assert spec.required_elements == ["Nd", "Fe"]
-    assert spec.allowed_elements == ["Nd", "Fe"]
-    assert spec.chemical_system == "Nd-Fe"
-    assert spec.objectives[0].property == "dft_mag_density"
-    assert spec.objectives[0].target == 0.15
-    assert spec.ambiguities
-
-
-def test_semantics_extract_rare_earth_exclusion() -> None:
-    spec = extract_semantics("设计不含稀土元素的高磁密度磁体候选")
-
-    assert "Nd" in spec.excluded_elements
-    assert "Dy" in spec.excluded_elements
-    assert spec.objectives[0].property == "dft_mag_density"
-    assert spec.objectives[0].target == 0.2
 
 
 def test_websocket_proposes_plan_without_starting_generation() -> None:

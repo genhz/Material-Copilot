@@ -177,6 +177,5 @@ export interface AgentResultEvent {
   action?: string
   material_data?: MaterialData | null
   job_id?: string | null
-  campaign_id?: string | null
   plan_id?: string | null
 }

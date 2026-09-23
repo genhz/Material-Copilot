@@ -5,8 +5,6 @@ export interface RealtimeMessage {
   sequence?: number
   channel?: string
   resource_id?: string
-  job?: unknown
-  campaign?: unknown
   plan?: unknown
   workflow?: unknown
   step?: unknown

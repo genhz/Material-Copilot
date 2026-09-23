@@ -343,14 +343,6 @@ const isExecuting = computed(() => {
   return status === 'confirmed' || status === 'running'
 })
 
-const primaryJobId = computed(
-  () =>
-    workflow.value?.result?.primary_job_id ||
-    workflow.value?.result?.jobs[0]?.job_id ||
-    workflow.value?.job_ids[0] ||
-    null
-)
-
 const workflowResult = computed(() => workflow.value?.result || null)
 
 const isConnected = computed(() => socketApi?.isConnected.value || false)
@@ -365,7 +357,6 @@ export function useAgentSession() {
     isConnected,
     isPlanning,
     isExecuting,
-    primaryJobId,
     workflowResult,
     lastResult,
     sessionId,

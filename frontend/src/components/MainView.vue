@@ -5,10 +5,8 @@ import CrystalViewer from './crystal/CrystalViewer.vue'
 import MaterialPanel from './data/MaterialPanel.vue'
 import AIAssistant from './chat/AIAssistant.vue'
 import GenerationPanel from './generation/GenerationPanel.vue'
-import CampaignPanel from './generation/CampaignPanel.vue'
 import { useMaterialSearch } from '../composables/useMaterialSearch'
 import { useGeneration } from '../composables/useGeneration'
-import { useCampaign } from '../composables/useCampaign'
 import type { GeneratedCandidate, MaterialData } from '../types/material'
 import type { WorkflowResult } from '../types/agent'
 
@@ -21,28 +19,14 @@ const {
 } = useMaterialSearch()
 
 const {
-  jobId: generationJobId,
   candidates: generatedCandidates,
   panelOpen: generationPanelOpen,
-  openGeneration,
+  hasCandidates,
   openWorkflowResult,
-  restoreGeneration,
   closePanel: closeGenerationPanel,
   reopenPanel: reopenGenerationPanel,
   selectCandidate,
 } = useGeneration()
-
-const {
-  campaignId,
-  panelOpen: campaignPanelOpen,
-  openCampaign,
-  restoreCampaign,
-  closePanel: closeCampaignPanel,
-  reopenPanel: reopenCampaignPanel,
-} = useCampaign()
-
-restoreGeneration()
-restoreCampaign()
 
 const handleSearch = (formula: string) => {
   doSearch(formula)
@@ -63,18 +47,7 @@ const handleMaterialFound = (data: MaterialData, action: 'chat' | 'render') => {
   // 如果 action 是 'chat'，不更新 currentMaterial，侧边栏保持关闭
 }
 
-const handleGenerationStarted = (jobId: string) => {
-  closeCampaignPanel()
-  openGeneration(jobId)
-}
-
-const handleCampaignStarted = (nextCampaignId: string) => {
-  closeGenerationPanel()
-  openCampaign(nextCampaignId)
-}
-
 const handleWorkflowCompleted = (result: WorkflowResult) => {
-  closeCampaignPanel()
   openWorkflowResult(result)
 }
 
@@ -179,14 +152,8 @@ const handleGeneratedCandidate = (candidate: GeneratedCandidate) => {
       @close="closeGenerationPanel"
     />
 
-    <CampaignPanel
-      v-if="campaignPanelOpen"
-      @select-candidate="handleGeneratedCandidate"
-      @close="closeCampaignPanel"
-    />
-
     <el-button
-      v-if="generationJobId && !generationPanelOpen && !campaignId"
+      v-if="hasCandidates && !generationPanelOpen"
       class="generation-reopen"
       :icon="Grid"
       @click="reopenGenerationPanel"
@@ -194,20 +161,9 @@ const handleGeneratedCandidate = (candidate: GeneratedCandidate) => {
       候选列表 {{ generatedCandidates.length }}
     </el-button>
 
-    <el-button
-      v-if="campaignId && !campaignPanelOpen"
-      class="generation-reopen campaign-reopen"
-      :icon="Grid"
-      @click="reopenCampaignPanel"
-    >
-      多模型任务
-    </el-button>
-
     <!-- AI Assistant (Top Layer) -->
     <AIAssistant
       @material-found="handleMaterialFound"
-      @generation-started="handleGenerationStarted"
-      @campaign-started="handleCampaignStarted"
       @workflow-completed="handleWorkflowCompleted"
     />
   </div>

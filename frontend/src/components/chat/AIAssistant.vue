@@ -14,8 +14,6 @@ import type { MaterialData } from '../../types/material'
 
 const emit = defineEmits<{
   materialFound: [data: MaterialData, action: 'chat' | 'render']
-  generationStarted: [jobId: string]
-  campaignStarted: [campaignId: string]
   workflowCompleted: [result: WorkflowResult]
 }>()
 
@@ -129,11 +127,7 @@ watch(workflowResult, (result) => {
 watch(lastResult, (result) => {
   if (!result || result === handledResult) return
   handledResult = result
-  if (result.job_id) {
-    emit('generationStarted', result.job_id)
-  } else if (result.campaign_id) {
-    emit('campaignStarted', result.campaign_id)
-  } else if (result.material_data && !workflowResult.value) {
+  if (result.material_data && !workflowResult.value) {
     emit(
       'materialFound',
       result.material_data,

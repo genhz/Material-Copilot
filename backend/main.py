@@ -26,11 +26,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
-from agent import execute_agent, AgentResult
+from agent import execute_agent
 from generation.manager import get_generation_manager
 from generation.router import router as generation_router
 from realtime.router import router as realtime_router
-from skills.material_search import MaterialSearchResult
 
 load_dotenv()
 

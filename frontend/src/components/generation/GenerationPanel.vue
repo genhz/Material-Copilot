@@ -5,14 +5,10 @@ import {
   ArrowRight,
   Close,
   Delete,
-  Refresh,
   VideoPlay,
 } from '@element-plus/icons-vue'
 import { useGeneration } from '../../composables/useGeneration'
-import type {
-  GeneratedCandidate,
-  GenerationStatus,
-} from '../../types/material'
+import type { GeneratedCandidate } from '../../types/material'
 
 const emit = defineEmits<{
   selectCandidate: [candidate: GeneratedCandidate]
@@ -20,28 +16,13 @@ const emit = defineEmits<{
 }>()
 
 const {
-  job,
   workflowResult,
   candidates,
   collection,
   selectedCandidateId,
-  error,
-  isCancelling,
-  isConnected,
-  isActive,
-  progressPercent,
   selectCandidate,
-  cancel,
   clearGeneration,
 } = useGeneration()
-
-const statusLabels: Record<GenerationStatus, string> = {
-  queued: '排队中',
-  running: '生成中',
-  completed: '已完成',
-  failed: '失败',
-  cancelled: '已取消',
-}
 
 const statusLabel = computed(() => {
   if (workflowResult.value) {
@@ -49,14 +30,14 @@ const statusLabel = computed(() => {
       ? '部分完成'
       : '已完成'
   }
-  return job.value ? statusLabels[job.value.status] : '准备中'
+  return '准备中'
 })
 
 const modelLabel = computed(() => {
   if (workflowResult.value) {
     return `Workflow · ${workflowResult.value.jobs.length} jobs`
   }
-  return job.value?.model_label || job.value?.model_id || '材料生成'
+  return '材料生成'
 })
 
 const conditionText = computed(() => {
@@ -67,23 +48,21 @@ const conditionText = computed(() => {
       ` · 失败 Job ${workflowResult.value.failed_job_count}`
     )
   }
-  const conditions = job.value?.request.conditions || {}
-  const entries = Object.entries(conditions)
-  if (!entries.length && job.value?.request.target_magnetic_density != null) {
-    return `dft_mag_density=${job.value.request.target_magnetic_density}`
-  }
-  return entries.length
-    ? entries.map(([key, value]) => `${key}=${value}`).join(' · ')
-    : '无条件生成'
+  return '等待 Workflow 结果'
 })
 
 const statusType = computed(() => {
   if (workflowResult.value?.status === 'completed') return 'success'
   if (workflowResult.value?.status === 'partial') return 'warning'
-  if (job.value?.status === 'completed') return 'success'
-  if (job.value?.status === 'failed') return 'danger'
-  if (job.value?.status === 'cancelled') return 'info'
   return 'primary'
+})
+
+const errorText = computed(() => {
+  const failures = workflowResult.value?.failures || []
+  if (!failures.length) return ''
+  return failures
+    .map((failure) => String(failure.reason || failure.error || failure))
+    .join('\n')
 })
 
 const selectedIndex = computed(() => {
@@ -119,16 +98,6 @@ function moveSelection(offset: number) {
         </div>
         <div class="generation-actions">
           <el-button
-            v-if="isActive"
-            text
-            size="small"
-            :loading="isCancelling"
-            @click="cancel"
-          >
-            取消
-          </el-button>
-          <el-button
-            v-else
             text
             circle
             size="small"
@@ -153,62 +122,38 @@ function moveSelection(offset: number) {
             >
               {{ statusLabel }}
             </el-tag>
-            <span
-              class="connection-state"
-              :class="{ connected: isConnected }"
-            >
-              {{
-                workflowResult
-                  ? '聚合结果'
-                  : isConnected
-                    ? '实时'
-                    : '重连中'
-              }}
+            <span class="result-state">
+              聚合结果
             </span>
           </div>
-          <span class="status-progress">{{ progressPercent }}%</span>
+          <span class="status-progress">
+            {{ workflowResult ? '100%' : '0%' }}
+          </span>
         </div>
         <el-progress
-          :percentage="progressPercent"
+          :percentage="workflowResult ? 100 : 0"
           :stroke-width="7"
           :show-text="false"
-          :status="job?.status === 'failed' ? 'exception' : undefined"
+          :status="workflowResult?.status === 'partial' ? 'warning' : undefined"
         />
         <p class="status-note">
           <span>
             <strong>{{ modelLabel }}</strong>
           </span>
           <span>{{ conditionText }}</span>
-          <span v-if="job?.message">{{ job.message }}</span>
         </p>
       </div>
 
       <el-alert
-        v-if="error || job?.error_message"
-        :title="error || job?.error_message || ''"
-        type="error"
+        v-if="errorText"
+        :title="errorText"
+        type="warning"
         :closable="false"
         show-icon
       />
 
-      <div v-if="job?.status === 'queued'" class="waiting-state">
-        <el-icon class="is-loading" :size="24"><Refresh /></el-icon>
-        <span>任务正在等待 MatterGen Worker。</span>
-      </div>
-
-      <div v-else-if="isActive" class="waiting-state">
-        <el-icon class="is-loading" :size="24"><Refresh /></el-icon>
-        <span>
-          {{ job?.message || '正在执行扩散采样，M4 上可能需要较长时间。' }}
-        </span>
-      </div>
-
-      <div v-else-if="job?.status === 'cancelled'" class="waiting-state">
-        <span>生成任务已取消。</span>
-      </div>
-
       <div
-        v-else-if="job?.status === 'completed' || workflowResult"
+        v-if="workflowResult"
         class="candidate-area"
       >
         <div class="candidate-summary">
@@ -393,13 +338,9 @@ function moveSelection(offset: number) {
   gap: 8px;
 }
 
-.connection-state {
+.result-state {
   color: var(--el-color-warning);
   font-size: 11px;
-}
-
-.connection-state.connected {
-  color: var(--el-color-success);
 }
 
 .status-note {
@@ -408,14 +349,6 @@ function moveSelection(offset: number) {
   justify-content: space-between;
   gap: 12px;
   margin: 0;
-}
-
-.waiting-state {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 88px;
-  font-size: 13px;
 }
 
 .candidate-area {
