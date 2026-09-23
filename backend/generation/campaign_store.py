@@ -44,7 +44,9 @@ class CampaignStore:
     def update(self, campaign_id: str, **updates) -> CampaignJob:
         campaign = self.get(campaign_id)
         updates["updated_at"] = utc_now()
-        updated = campaign.model_copy(update=updates)
+        payload = campaign.model_dump(mode="python")
+        payload.update(updates)
+        updated = CampaignJob.model_validate(payload)
         self.save(updated)
         return updated
 

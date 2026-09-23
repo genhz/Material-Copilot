@@ -79,9 +79,15 @@ class GenerationStore:
 
     def update_job(self, job_id: str, **updates: Any) -> GenerationJob:
         job = self.get_job(job_id)
+        if "status" in updates:
+            validated = job.model_copy(deep=True)
+            validated.transition(updates["status"])
+            updates["status"] = validated.status
         updates["sequence"] = job.sequence + 1
         updates["updated_at"] = utc_now()
-        updated = job.model_copy(update=updates)
+        payload = job.model_dump(mode="python")
+        payload.update(updates)
+        updated = GenerationJob.model_validate(payload)
         self.save_job(updated)
         return updated
 

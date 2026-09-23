@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 
 from generation.exceptions import GenerationError
 
@@ -30,6 +30,7 @@ class ConditionSpec:
     minimum: float | None = None
     maximum: float | None = None
     options: tuple[str, ...] = ()
+    unit: Optional[str] = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -41,6 +42,7 @@ class ConditionSpec:
             "minimum": self.minimum,
             "maximum": self.maximum,
             "options": list(self.options),
+            "unit": self.unit,
         }
 
 
@@ -55,6 +57,15 @@ class MatterGenModelSpec:
     conditions: dict[str, ConditionSpec]
     default_guidance_scale: float
     category: str
+    task_types: tuple[str, ...] = ("material_generation",)
+    objective_sets: tuple[frozenset[str], ...] = (frozenset(),)
+    required_inputs: tuple[str, ...] = ()
+    supports_composition: bool = False
+    supports_exact_formula: bool = False
+    supports_space_group: bool = False
+    supports_crystal_system: bool = False
+    postprocessors: tuple[str, ...] = ("element_composition_filter",)
+    static_available: bool = True
 
     @property
     def download_url(self) -> str:
@@ -71,6 +82,7 @@ def _float_condition(
     *,
     minimum: float | None = None,
     maximum: float | None = None,
+    unit: str | None = None,
 ) -> ConditionSpec:
     return ConditionSpec(
         name=name,
@@ -80,6 +92,7 @@ def _float_condition(
         description=description,
         minimum=minimum,
         maximum=maximum,
+        unit=unit,
     )
 
 
@@ -92,6 +105,7 @@ MODEL_REGISTRY: dict[str, MatterGenModelSpec] = {
         conditions={},
         default_guidance_scale=0.0,
         category="unconditional",
+        objective_sets=(frozenset(),),
     ),
     "mp_20_base": MatterGenModelSpec(
         model_id="mp_20_base",
@@ -101,6 +115,7 @@ MODEL_REGISTRY: dict[str, MatterGenModelSpec] = {
         conditions={},
         default_guidance_scale=0.0,
         category="unconditional",
+        objective_sets=(frozenset(),),
     ),
     "dft_mag_density": MatterGenModelSpec(
         model_id="dft_mag_density",
@@ -114,10 +129,12 @@ MODEL_REGISTRY: dict[str, MatterGenModelSpec] = {
                 "目标 DFT 磁密度，单位 Å⁻³。",
                 minimum=0.0,
                 maximum=1.0,
+                unit="Å^-3",
             )
         },
         default_guidance_scale=2.0,
         category="magnetic",
+        objective_sets=(frozenset({"dft_mag_density"}),),
     ),
     "dft_mag_density_hhi_score": MatterGenModelSpec(
         model_id="dft_mag_density_hhi_score",
@@ -131,6 +148,7 @@ MODEL_REGISTRY: dict[str, MatterGenModelSpec] = {
                 "目标 DFT 磁密度，单位 Å⁻³。",
                 minimum=0.0,
                 maximum=1.0,
+                unit="Å^-3",
             ),
             "hhi_score": _float_condition(
                 "hhi_score",
@@ -142,6 +160,9 @@ MODEL_REGISTRY: dict[str, MatterGenModelSpec] = {
         },
         default_guidance_scale=2.0,
         category="magnetic",
+        objective_sets=(
+            frozenset({"dft_mag_density", "hhi_score"}),
+        ),
     ),
     "chemical_system": MatterGenModelSpec(
         model_id="chemical_system",
@@ -159,6 +180,9 @@ MODEL_REGISTRY: dict[str, MatterGenModelSpec] = {
         },
         default_guidance_scale=2.0,
         category="chemistry",
+        objective_sets=(frozenset(),),
+        required_inputs=("chemical_system",),
+        supports_composition=True,
     ),
     "chemical_system_energy_above_hull": MatterGenModelSpec(
         model_id="chemical_system_energy_above_hull",
@@ -179,10 +203,14 @@ MODEL_REGISTRY: dict[str, MatterGenModelSpec] = {
                 "目标 energy above hull，单位 eV/atom。",
                 minimum=0.0,
                 maximum=1.0,
+                unit="eV/atom",
             ),
         },
         default_guidance_scale=2.0,
         category="stability",
+        objective_sets=(frozenset({"energy_above_hull"}),),
+        required_inputs=("chemical_system",),
+        supports_composition=True,
     ),
     "dft_band_gap": MatterGenModelSpec(
         model_id="dft_band_gap",
@@ -196,10 +224,12 @@ MODEL_REGISTRY: dict[str, MatterGenModelSpec] = {
                 "目标带隙，单位 eV。",
                 minimum=0.0,
                 maximum=20.0,
+                unit="eV",
             )
         },
         default_guidance_scale=2.0,
         category="electronic",
+        objective_sets=(frozenset({"dft_band_gap"}),),
     ),
     "ml_bulk_modulus": MatterGenModelSpec(
         model_id="ml_bulk_modulus",
@@ -213,10 +243,12 @@ MODEL_REGISTRY: dict[str, MatterGenModelSpec] = {
                 "目标体积模量，单位 GPa。",
                 minimum=0.0,
                 maximum=1000.0,
+                unit="GPa",
             )
         },
         default_guidance_scale=2.0,
         category="mechanical",
+        objective_sets=(frozenset({"ml_bulk_modulus"}),),
     ),
     "space_group": MatterGenModelSpec(
         model_id="space_group",
@@ -236,6 +268,9 @@ MODEL_REGISTRY: dict[str, MatterGenModelSpec] = {
         },
         default_guidance_scale=2.0,
         category="symmetry",
+        objective_sets=(frozenset(),),
+        required_inputs=("space_group",),
+        supports_space_group=True,
     ),
 }
 
@@ -255,4 +290,3 @@ def get_model_spec(model_id: str) -> MatterGenModelSpec:
 
 def list_model_specs() -> list[MatterGenModelSpec]:
     return list(MODEL_REGISTRY.values())
-

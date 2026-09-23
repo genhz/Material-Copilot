@@ -39,3 +39,5 @@ backend/vendor/mattergen/data-release/alex-mp/*.zip
 backend/vendor/mattergen/data-release/alex-mp/*.gz
 backend/vendor/mattergen/data-release/mp-20/*.zip
 *.ckpt.lfs-pointer
+
+backend/tests

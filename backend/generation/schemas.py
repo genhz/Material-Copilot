@@ -1,18 +1,39 @@
 """Pydantic schemas for MatterGen generation jobs and campaigns."""
 
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
 
-JobStatus = Literal[
-    "queued",
-    "running",
-    "completed",
-    "failed",
-    "cancelled",
-]
+class JobStatus(str, Enum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+JOB_TRANSITIONS: dict[JobStatus, frozenset[JobStatus]] = {
+    JobStatus.QUEUED: frozenset(
+        {JobStatus.RUNNING, JobStatus.FAILED, JobStatus.CANCELLED}
+    ),
+    JobStatus.RUNNING: frozenset(
+        {
+            JobStatus.COMPLETED,
+            JobStatus.FAILED,
+            JobStatus.CANCELLED,
+        }
+    ),
+    JobStatus.COMPLETED: frozenset(),
+    JobStatus.FAILED: frozenset(),
+    JobStatus.CANCELLED: frozenset(),
+}
+
+
+class InvalidJobTransition(ValueError):
+    """Raised when a generation job attempts an illegal transition."""
 
 JobPhase = Literal[
     "queued",
@@ -131,7 +152,7 @@ class GenerationJob(BaseModel):
     """Persisted generation job state."""
 
     job_id: str
-    status: JobStatus = "queued"
+    status: JobStatus = JobStatus.QUEUED
     phase: JobPhase = "queued"
     progress: float = Field(default=0.0, ge=0.0, le=1.0)
     message: Optional[str] = None
@@ -148,6 +169,16 @@ class GenerationJob(BaseModel):
     error_code: Optional[str] = None
     error_message: Optional[str] = None
     worker_pid: Optional[int] = None
+
+    def transition(self, target: JobStatus) -> None:
+        target = JobStatus(target)
+        if self.status == target:
+            return
+        if target not in JOB_TRANSITIONS.get(self.status, frozenset()):
+            raise InvalidJobTransition(
+                f"Illegal job transition: {self.status.value} -> {target.value}"
+            )
+        self.status = target
 
 
 class GeneratedCandidate(BaseModel):
@@ -224,7 +255,7 @@ class CampaignRunState(BaseModel):
     conditions: dict[str, Any]
     request: GenerationRequest
     job_id: Optional[str] = None
-    status: JobStatus = "queued"
+    status: JobStatus = JobStatus.QUEUED
     progress: float = 0.0
     error_message: Optional[str] = None
 

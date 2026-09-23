@@ -11,11 +11,28 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from agent_workflow.planner import WorkflowPlanner
-from agent_workflow.schemas import ExecutionPlan, PlanStep, WorkflowRunState
+from agent_workflow.requirement_parser import RequirementParser
+from agent_workflow.schemas import (
+    ExecutionPlan,
+    PlanStep,
+    WorkflowResult,
+    WorkflowResultJob,
+    WorkflowRunState,
+)
+from agent_workflow.state import (
+    PLAN_TERMINAL_STATUSES,
+    WORKFLOW_TERMINAL_STATUSES,
+    PlanStatus,
+    StepStatus,
+    WorkflowResultStatus,
+    WorkflowStatus,
+    aggregate_workflow_status,
+)
+from agent_workflow.tool_executor import WorkflowToolExecutor
 from generation.exceptions import GenerationError
 from generation.manager import get_generation_manager
 from generation.model_registry import get_model_spec
-from generation.schemas import GenerationRequest
+from generation.schemas import GenerationRequest, JobStatus
 
 
 logger = logging.getLogger(__name__)
@@ -41,12 +58,19 @@ class AgentWorkflowService:
     def __init__(self):
         self._sessions: dict[str, AgentSessionState] = {}
         self._planner = None
+        self._requirement_parser = None
 
     @property
     def planner(self) -> WorkflowPlanner:
         if self._planner is None:
             self._planner = WorkflowPlanner()
         return self._planner
+
+    @property
+    def requirement_parser(self) -> RequirementParser:
+        if self._requirement_parser is None:
+            self._requirement_parser = RequirementParser()
+        return self._requirement_parser
 
     def _session(self, session_id: str) -> AgentSessionState:
         state = self._sessions.get(session_id)
@@ -130,46 +154,24 @@ class AgentWorkflowService:
             {"content": "正在解析材料范围、元素约束和性能目标。\n"},
         )
 
-        plan = await self.planner.propose(
-            session_id=session_id,
-            message=message,
+        requirement = await self.requirement_parser.parse(
+            message,
             history=state.messages[-12:],
         )
-        if plan is None:
-            from agent import execute_agent
-
-            result = await execute_agent(message, state.messages[-12:])
-            state.messages.append(
-                {"role": "assistant", "content": result.reply}
-            )
-            await self.publish(
-                session_id,
-                "assistant.completed",
-                {
-                    "message": result.reply,
-                    "action": result.action,
-                    "material_data": (
-                        result.material_data.to_dict()
-                        if result.material_data
-                        else None
-                    ),
-                    "job_id": result.job_id,
-                    "campaign_id": result.campaign_id,
-                },
-            )
-            return
-
-        state.current_plan = plan
-        completion_message = (
-            "执行计划已生成，请确认或修改后开始执行。"
+        plan = self.planner.plan(
+            session_id=session_id,
+            requirement=requirement,
+            original_message=message,
         )
+        state.current_plan = plan
+        completion_message = self._planning_message(plan)
         state.messages.append(
             {"role": "assistant", "content": completion_message}
         )
         await self.publish(
             session_id,
             "assistant.delta",
-            {"content": "已生成执行计划，请确认或修改后开始执行。\n"},
+            {"content": self._planning_delta(plan)},
         )
         await self.publish(
             session_id,
@@ -213,20 +215,17 @@ class AgentWorkflowService:
             {"role": "user", "content": f"修改执行计划：{instruction}"}
         )
         await self.publish(session_id, "plan.revising", {"plan_id": plan_id})
-        revised = await self.planner.propose(
-            session_id=session_id,
-            message=plan.original_message,
+        revised_requirement = await self.requirement_parser.parse_revision(
+            revision_text=instruction,
+            previous_requirement=plan.request_spec,
             history=state.messages[-12:],
-            previous_plan=plan,
-            revision_instruction=instruction,
         )
-        if revised is None:
-            await self.publish(
-                session_id,
-                "error",
-                {"code": "REVISION_FAILED", "message": "无法根据修改要求更新计划。"},
-            )
-            return
+        revised = self.planner.plan(
+            session_id=session_id,
+            requirement=revised_requirement,
+            original_message=plan.original_message,
+            previous_plan=plan,
+        )
         state.current_plan = revised
         await self.publish(
             session_id,
@@ -259,6 +258,19 @@ class AgentWorkflowService:
                 },
             )
             return
+        if (
+            plan.capability_status != "ready"
+            or not plan.steps
+        ):
+            await self.publish(
+                session_id,
+                "error",
+                {
+                    "code": "PLAN_NOT_CONFIRMABLE",
+                    "message": "当前计划尚不可执行，请先补充或调整需求。",
+                },
+            )
+            return
         if state.task and not state.task.done():
             await self.publish(
                 session_id,
@@ -267,11 +279,12 @@ class AgentWorkflowService:
             )
             return
 
-        plan.status = "confirmed"
+        plan.transition(PlanStatus.CONFIRMED)
         workflow = WorkflowRunState(
             workflow_id=str(uuid.uuid4()),
             plan_id=plan.plan_id,
             session_id=session_id,
+            status=WorkflowStatus.CONFIRMED,
         )
         state.workflow = workflow
         await self.publish(
@@ -285,6 +298,20 @@ class AgentWorkflowService:
         )
         state.task = asyncio.create_task(self._execute_plan(state, plan))
 
+    @staticmethod
+    def _planning_message(plan: ExecutionPlan) -> str:
+        if plan.capability_status == "ready":
+            return "执行计划已生成，请确认或修改后开始执行。"
+        if plan.capability_status == "clarification":
+            return plan.questions[0] if plan.questions else "请补充材料需求。"
+        if plan.capability_status == "unavailable":
+            return "检测到所需能力已注册，但当前运行环境无法执行。"
+        return "当前平台没有完整能力满足该需求。"
+
+    @staticmethod
+    def _planning_delta(plan: ExecutionPlan) -> str:
+        return f"{AgentWorkflowService._planning_message(plan)}\n"
+
     async def cancel_workflow(self, session_id: str) -> None:
         state = self._session(session_id)
         if state.task and not state.task.done():
@@ -296,9 +323,13 @@ class AgentWorkflowService:
                     await manager.cancel(job_id)
                 except Exception:
                     pass
-            state.workflow.status = "cancelled"
-        if state.current_plan:
-            state.current_plan.status = "cancelled"
+            if state.workflow.status not in WORKFLOW_TERMINAL_STATUSES:
+                state.workflow.transition(WorkflowStatus.CANCELLED)
+        if (
+            state.current_plan
+            and state.current_plan.status not in PLAN_TERMINAL_STATUSES
+        ):
+            state.current_plan.transition(PlanStatus.CANCELLED)
         await self.publish(session_id, "workflow.cancelled")
 
     async def clear_session(self, session_id: str) -> None:
@@ -317,15 +348,26 @@ class AgentWorkflowService:
         state: AgentSessionState,
         plan: ExecutionPlan,
     ) -> None:
+        if not any(step.kind == "generate" for step in plan.steps):
+            await WorkflowToolExecutor().execute(
+                state,
+                plan,
+                self.publish,
+                self._abort_workflow,
+            )
+            return
+
         manager = get_generation_manager()
         await manager.startup()
         workflow = state.workflow
         assert workflow is not None
-        workflow.status = "running"
-        plan.status = "executing"
+        workflow.transition(WorkflowStatus.RUNNING)
+        plan.transition(PlanStatus.EXECUTING)
         plan.updated_at = datetime.now(timezone.utc)
         job_ids: list[str] = []
-        candidate_jobs: list[str] = []
+        candidate_jobs: list[tuple[PlanStep, str]] = []
+        generation_jobs: list[tuple[PlanStep, str]] = []
+        failures: list[dict[str, Any]] = []
         had_optional_failure = False
         total_steps = max(1, len(plan.steps))
         steps_by_id = {step.id: step for step in plan.steps}
@@ -338,7 +380,7 @@ class AgentWorkflowService:
                 preflight_error = self._preflight_step(plan, step)
                 if preflight_error is None:
                     continue
-                step.status = "failed"
+                step.transition(StepStatus.FAILED)
                 step.error_message = preflight_error
                 await self.publish(
                     state.session_id,
@@ -358,18 +400,30 @@ class AgentWorkflowService:
                     )
                     return
                 had_optional_failure = True
+                failures.append(
+                    {
+                        "step_id": step.id,
+                        "model_id": step.model_id,
+                        "reason": preflight_error,
+                    }
+                )
 
             for index, step in enumerate(plan.steps):
                 workflow.current_step_id = step.id
 
-                if step.status in {"failed", "blocked", "skipped", "cancelled"}:
+                if step.status in {
+                    StepStatus.FAILED,
+                    StepStatus.BLOCKED,
+                    StepStatus.SKIPPED,
+                    StepStatus.CANCELLED,
+                }:
                     continue
 
                 if not self._dependencies_satisfied(
                     step,
                     steps_by_id,
                 ):
-                    step.status = "blocked"
+                    step.transition(StepStatus.BLOCKED)
                     step.error_message = "依赖步骤未成功完成。"
                     workflow.blocked_step_ids = [
                         *workflow.blocked_step_ids,
@@ -385,13 +439,13 @@ class AgentWorkflowService:
                     )
                     continue
 
-                step.status = "running"
+                step.transition(StepStatus.RUNNING)
 
                 if (
                     step.requires_candidates
                     and not candidate_jobs
                 ):
-                    step.status = "skipped"
+                    step.transition(StepStatus.SKIPPED)
                     step.error_message = "没有可用的生成候选。"
                     await self.publish(
                         state.session_id,
@@ -411,7 +465,7 @@ class AgentWorkflowService:
                     return
 
                 if step.kind != "generate":
-                    step.status = "completed"
+                    step.transition(StepStatus.COMPLETED)
                     step.progress = 1.0
                     await self.publish(
                         state.session_id,
@@ -440,8 +494,10 @@ class AgentWorkflowService:
                     index,
                     total_steps,
                 )
+                if job_id:
+                    generation_jobs.append((step, job_id))
                 if success and job_id:
-                    candidate_jobs.append(job_id)
+                    candidate_jobs.append((step, job_id))
                     job_ids.append(job_id)
                     workflow.job_ids = list(job_ids)
                 elif step.required:
@@ -455,18 +511,91 @@ class AgentWorkflowService:
                     return
                 else:
                     had_optional_failure = True
+                    failures.append(
+                        {
+                            "step_id": step.id,
+                            "model_id": step.model_id,
+                            "reason": step.error_message or "生成步骤失败。",
+                        }
+                    )
                 workflow.progress = (index + 1) / total_steps
 
-            candidate_count = 0
-            for job_id in candidate_jobs:
-                try:
-                    collection = await manager.get_candidates(job_id)
-                    candidate_count += len(collection.candidates)
-                except Exception:
-                    pass
+            candidates: list[dict[str, Any]] = []
+            result_jobs: list[WorkflowResultJob] = []
+            for step, job_id in generation_jobs:
+                job_candidates: list[dict[str, Any]] = []
+                job_status = (
+                    "completed"
+                    if step.status == StepStatus.COMPLETED
+                    else "failed"
+                )
+                error = None
+                if job_status == JobStatus.COMPLETED.value:
+                    try:
+                        collection = await manager.get_candidates(job_id)
+                        job_candidates = [
+                            candidate.model_dump(mode="json")
+                            for candidate in collection.candidates
+                        ]
+                    except Exception as exc:
+                        job_status = "failed"
+                        error = str(exc)
+                        failures.append(
+                            {
+                                "step_id": step.id,
+                                "job_id": job_id,
+                                "model_id": step.model_id,
+                                "reason": error,
+                            }
+                        )
+                else:
+                    error = step.error_message or "生成步骤失败。"
+
+                result_jobs.append(
+                    WorkflowResultJob(
+                        step_id=step.id,
+                        job_id=job_id,
+                        model_id=step.model_id or "unknown",
+                        model_label=(
+                            job_candidates[0].get("model_label")
+                            if job_candidates
+                            else step.model_id
+                        ),
+                        status=job_status,
+                        candidate_count=len(job_candidates),
+                        candidates=job_candidates,
+                        error=error,
+                    )
+                )
+                candidates.extend(job_candidates)
+
+            candidate_count = len(candidates)
 
             workflow.candidate_count = candidate_count
             if candidate_count == 0:
+                if generation_jobs:
+                    failed_status = aggregate_workflow_status(
+                        [step.status for step, _ in generation_jobs],
+                        has_failures=bool(failures),
+                    )
+                    if failed_status == WorkflowStatus.FAILED:
+                        workflow.transition(WorkflowStatus.FAILED)
+                        workflow.error_message = (
+                            "所有生成 Job 均失败。"
+                        )
+                        plan.transition(PlanStatus.FAILED)
+                        await self.publish(
+                            state.session_id,
+                            "workflow.failed",
+                            {
+                                "workflow": workflow.model_dump(
+                                    mode="json"
+                                ),
+                                "plan": plan.model_dump(mode="json"),
+                                "error": workflow.error_message,
+                            },
+                        )
+                        return
                 await self._abort_workflow(
                     state,
                     plan,
@@ -476,30 +605,61 @@ class AgentWorkflowService:
                 )
                 return
 
-            if not had_optional_failure:
-                workflow.status = "completed"
-                plan.status = "completed"
+            aggregated_status = aggregate_workflow_status(
+                [job.status for job in result_jobs],
+                has_failures=bool(failures) or had_optional_failure,
+            )
+            workflow.transition(aggregated_status)
+            if aggregated_status == WorkflowStatus.COMPLETED:
+                plan.transition(PlanStatus.COMPLETED)
             else:
-                workflow.status = "partial"
-                plan.status = "partial"
+                plan.transition(PlanStatus.PARTIAL)
 
+            workflow.result = WorkflowResult(
+                status=(
+                    WorkflowResultStatus.COMPLETED
+                    if workflow.status == WorkflowStatus.COMPLETED
+                    else "partial"
+                ),
+                primary_job_id=(
+                    result_jobs[0].job_id if result_jobs else None
+                ),
+                jobs=result_jobs,
+                requested_candidate_count=(
+                    sum(
+                        step.num_candidates or 0
+                        for step in plan.steps
+                        if step.kind == "generate"
+                    )
+                ),
+                candidate_count=candidate_count,
+                completed_job_count=sum(
+                    job.status == JobStatus.COMPLETED for job in result_jobs
+                ),
+                failed_job_count=sum(
+                    job.status == JobStatus.FAILED for job in result_jobs
+                ),
+                candidates=candidates,
+                failures=failures,
+            )
             await self.publish(
                 state.session_id,
                 "workflow.completed",
                 {
                     "workflow": workflow.model_dump(mode="json"),
                     "plan": plan.model_dump(mode="json"),
+                    "result": workflow.result.model_dump(mode="json"),
                 },
             )
         except asyncio.CancelledError:
-            workflow.status = "cancelled"
-            plan.status = "cancelled"
+            workflow.transition(WorkflowStatus.CANCELLED)
+            plan.transition(PlanStatus.CANCELLED)
             await self.publish(state.session_id, "workflow.cancelled")
         except Exception as exc:
             logger.exception("Agent workflow execution failed")
-            workflow.status = "failed"
+            workflow.transition(WorkflowStatus.FAILED)
             workflow.error_message = str(exc)
-            plan.status = "failed"
+            plan.transition(PlanStatus.FAILED)
             await self.publish(
                 state.session_id,
                 "workflow.failed",
@@ -560,9 +720,9 @@ class AgentWorkflowService:
             if dependency_id in steps_by_id
         ]
         if step.dependency_policy == "any":
-            return "completed" in statuses
+            return StepStatus.COMPLETED in statuses
         return bool(statuses) and all(
-            status == "completed" for status in statuses
+            status == StepStatus.COMPLETED for status in statuses
         )
 
     async def _run_generation_step(
@@ -618,14 +778,14 @@ class AgentWorkflowService:
                         },
                     )
                     if current.status in {
-                        "completed",
-                        "failed",
-                        "cancelled",
+                        JobStatus.COMPLETED,
+                        JobStatus.FAILED,
+                        JobStatus.CANCELLED,
                     }:
-                        if current.status == "completed":
-                            step.status = "completed"
+                        if current.status == JobStatus.COMPLETED:
+                            step.transition(StepStatus.COMPLETED)
                             return True, job.job_id
-                        step.status = "failed"
+                        step.transition(StepStatus.FAILED)
                         step.error_message = (
                             current.error_message or current.message
                         )
@@ -635,7 +795,7 @@ class AgentWorkflowService:
                         break
                     await asyncio.sleep(0.5)
 
-            step.status = "failed"
+            step.transition(StepStatus.FAILED)
             if not retryable or attempt >= attempts - 1:
                 await self.publish(
                     state.session_id,
@@ -645,7 +805,7 @@ class AgentWorkflowService:
                         "step": step.model_dump(mode="json"),
                     },
                 )
-                return False, None
+                return False, step.job_id
 
             await self.publish(
                 state.session_id,
@@ -659,9 +819,9 @@ class AgentWorkflowService:
                 },
             )
             await asyncio.sleep(step.retry_delay_seconds)
-            step.status = "running"
+            step.transition(StepStatus.RUNNING)
 
-        return False, None
+        return False, step.job_id
 
     @staticmethod
     def _is_retryable(error_code: str) -> bool:
@@ -680,12 +840,14 @@ class AgentWorkflowService:
         reason: str,
     ) -> None:
         blocked_ids: list[str] = [
-            step.id for step in plan.steps if step.status == "blocked"
+            step.id
+            for step in plan.steps
+            if step.status == StepStatus.BLOCKED
         ]
         for step in plan.steps:
-            if step.status != "pending":
+            if step.status != StepStatus.PENDING:
                 continue
-            step.status = "blocked"
+            step.transition(StepStatus.BLOCKED)
             step.error_message = "上游步骤失败，未执行。"
             blocked_ids.append(step.id)
             await self.publish(
@@ -697,11 +859,11 @@ class AgentWorkflowService:
                 },
             )
 
-        workflow.status = "failed"
+        workflow.transition(WorkflowStatus.ABORTED)
         workflow.failed_step_id = failed_step.id if failed_step else None
         workflow.blocked_step_ids = blocked_ids
         workflow.error_message = reason
-        plan.status = "failed"
+        plan.transition(PlanStatus.ABORTED)
         await self.publish(
             state.session_id,
             "workflow.aborted",

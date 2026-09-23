@@ -21,6 +21,7 @@ const emit = defineEmits<{
 
 const {
   job,
+  workflowResult,
   candidates,
   collection,
   selectedCandidateId,
@@ -43,14 +44,29 @@ const statusLabels: Record<GenerationStatus, string> = {
 }
 
 const statusLabel = computed(() => {
+  if (workflowResult.value) {
+    return workflowResult.value.status === 'partial'
+      ? '部分完成'
+      : '已完成'
+  }
   return job.value ? statusLabels[job.value.status] : '准备中'
 })
 
 const modelLabel = computed(() => {
+  if (workflowResult.value) {
+    return `Workflow · ${workflowResult.value.jobs.length} jobs`
+  }
   return job.value?.model_label || job.value?.model_id || '材料生成'
 })
 
 const conditionText = computed(() => {
+  if (workflowResult.value) {
+    return (
+      `请求 ${workflowResult.value.requested_candidate_count}` +
+      ` · 生成 ${workflowResult.value.candidate_count}` +
+      ` · 失败 Job ${workflowResult.value.failed_job_count}`
+    )
+  }
   const conditions = job.value?.request.conditions || {}
   const entries = Object.entries(conditions)
   if (!entries.length && job.value?.request.target_magnetic_density != null) {
@@ -59,6 +75,15 @@ const conditionText = computed(() => {
   return entries.length
     ? entries.map(([key, value]) => `${key}=${value}`).join(' · ')
     : '无条件生成'
+})
+
+const statusType = computed(() => {
+  if (workflowResult.value?.status === 'completed') return 'success'
+  if (workflowResult.value?.status === 'partial') return 'warning'
+  if (job.value?.status === 'completed') return 'success'
+  if (job.value?.status === 'failed') return 'danger'
+  if (job.value?.status === 'cancelled') return 'info'
+  return 'primary'
 })
 
 const selectedIndex = computed(() => {
@@ -87,8 +112,10 @@ function moveSelection(offset: number) {
     <el-card class="generation-panel" shadow="always">
       <header class="generation-header">
         <div>
-          <div class="generation-eyebrow">MatterGen</div>
-          <h3>磁性材料候选</h3>
+          <div class="generation-eyebrow">
+            {{ workflowResult ? 'Workflow' : 'MatterGen' }}
+          </div>
+          <h3>材料候选</h3>
         </div>
         <div class="generation-actions">
           <el-button
@@ -120,15 +147,7 @@ function moveSelection(offset: number) {
         <div class="status-row">
           <div class="status-tags">
             <el-tag
-              :type="
-                job?.status === 'completed'
-                  ? 'success'
-                  : job?.status === 'failed'
-                    ? 'danger'
-                    : job?.status === 'cancelled'
-                      ? 'info'
-                      : 'primary'
-              "
+              :type="statusType"
               effect="light"
               size="small"
             >
@@ -138,7 +157,13 @@ function moveSelection(offset: number) {
               class="connection-state"
               :class="{ connected: isConnected }"
             >
-              {{ isConnected ? '实时' : '重连中' }}
+              {{
+                workflowResult
+                  ? '聚合结果'
+                  : isConnected
+                    ? '实时'
+                    : '重连中'
+              }}
             </span>
           </div>
           <span class="status-progress">{{ progressPercent }}%</span>
@@ -182,12 +207,32 @@ function moveSelection(offset: number) {
         <span>生成任务已取消。</span>
       </div>
 
-      <div v-else-if="job?.status === 'completed'" class="candidate-area">
+      <div
+        v-else-if="job?.status === 'completed' || workflowResult"
+        class="candidate-area"
+      >
         <div class="candidate-summary">
           <span>有效候选 {{ candidates.length }}</span>
           <span v-if="collection?.invalid_count">
             无效 {{ collection.invalid_count }}
           </span>
+        </div>
+
+        <div v-if="workflowResult?.jobs.length" class="job-summary-list">
+          <div
+            v-for="(resultJob, index) in workflowResult.jobs"
+            :key="resultJob.job_id"
+            class="job-summary-row"
+          >
+            <span>Job {{ index + 1 }}</span>
+            <span>{{ resultJob.candidate_count }} candidates</span>
+            <el-tag
+              :type="resultJob.status === 'completed' ? 'success' : 'danger'"
+              size="small"
+            >
+              {{ resultJob.status }}
+            </el-tag>
+          </div>
         </div>
 
         <div v-if="candidates.length" class="candidate-navigation">
@@ -323,6 +368,23 @@ function moveSelection(offset: number) {
 .candidate-metrics,
 .candidate-summary {
   font-size: 12px;
+}
+
+.job-summary-list {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 14px;
+}
+
+.job-summary-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  font-size: 12px;
+  background: var(--el-fill-color-light);
+  border-radius: 6px;
 }
 
 .status-tags {

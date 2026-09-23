@@ -9,12 +9,14 @@ import DOMPurify from 'dompurify'
 import { marked } from 'marked'
 import ExecutionPlanPanel from '../agent/ExecutionPlanPanel.vue'
 import { useAgentSession } from '../../composables/useAgentSession'
+import type { WorkflowResult } from '../../types/agent'
 import type { MaterialData } from '../../types/material'
 
 const emit = defineEmits<{
   materialFound: [data: MaterialData, action: 'chat' | 'render']
   generationStarted: [jobId: string]
   campaignStarted: [campaignId: string]
+  workflowCompleted: [result: WorkflowResult]
 }>()
 
 const {
@@ -22,7 +24,7 @@ const {
   workflow,
   isConnected,
   isPlanning,
-  primaryJobId,
+  workflowResult,
   lastResult,
   sendMessage,
   confirmPlan,
@@ -34,8 +36,8 @@ const {
 const workspaceVisible = ref(false)
 const inputMessage = ref('')
 const chatContainerRef = ref<HTMLElement | null>(null)
-let handledJobId: string | null = null
 let handledResult: unknown = null
+let handledWorkflowResult: unknown = null
 
 const renderMarkdown = (content: string) => {
   const html = marked.parse(content, {
@@ -79,16 +81,16 @@ const renderMarkdown = (content: string) => {
 const suggestions = [
   { label: '查看 Fe3O4', text: '查看 Fe3O4 的晶体结构' },
   {
-    label: '设计高磁密度材料',
-    text: '帮我设计高磁密度磁性材料候选',
+    label: '设计磁密度 0.2 材料',
+    text: '帮我设计 8 个磁密度约 0.2 的材料',
   },
   {
     label: '探索钕铁磁体',
-    text: '请探索钕铁合金磁性性能较优的晶体结构',
+    text: '请探索钕铁合金磁密度约 0.15 的晶体结构',
   },
   {
     label: '无稀土磁体',
-    text: '设计不含稀土元素的高磁密度磁体候选',
+    text: '设计不含稀土元素、磁密度约 0.2 的磁体候选',
   },
 ]
 
@@ -113,18 +115,25 @@ watch(messages, async () => {
   }
 }, { deep: true })
 
-watch(primaryJobId, (jobId) => {
-  if (!jobId || jobId === handledJobId) return
-  handledJobId = jobId
-  emit('generationStarted', jobId)
+watch(workflowResult, (result) => {
+  if (!result || result === handledWorkflowResult) return
+  handledWorkflowResult = result
+  if (
+    result.task_type === 'material_generation' ||
+    result.candidate_count > 0
+  ) {
+    emit('workflowCompleted', result)
+  }
 })
 
 watch(lastResult, (result) => {
   if (!result || result === handledResult) return
   handledResult = result
-  if (result.campaign_id) {
+  if (result.job_id) {
+    emit('generationStarted', result.job_id)
+  } else if (result.campaign_id) {
     emit('campaignStarted', result.campaign_id)
-  } else if (result.material_data) {
+  } else if (result.material_data && !workflowResult.value) {
     emit(
       'materialFound',
       result.material_data,

@@ -10,6 +10,11 @@ from agent_workflow.schemas import (
 )
 from agent_workflow.service import AgentWorkflowService
 from agent_workflow.semantics import extract_semantics
+from agent_workflow.state import (
+    PlanStatus,
+    StepStatus,
+    WorkflowStatus,
+)
 from main import app
 
 
@@ -54,7 +59,7 @@ def test_websocket_proposes_plan_without_starting_generation() -> None:
                 {
                     "action": "agent.message",
                     "session_id": "test-session",
-                    "message": "请探索钕铁合金磁性性能较优的晶体结构",
+                    "message": "请探索钕铁合金磁密度约 0.15 的晶体结构",
                     "request_id": "message-1",
                 }
             )
@@ -95,7 +100,7 @@ def test_websocket_proposes_plan_without_starting_generation() -> None:
             assert revised_plan is not None
             assert revised_plan["revision"] == 2
             assert revised_plan["request_spec"]["chemical_system"] == "Nd-Fe-B"
-            assert "目标有效候选数：4" in revised_plan["summary"]
+            assert "生成 4 个候选" in revised_plan["summary"]
 
 
 def test_confirmation_starts_workflow_execution() -> None:
@@ -152,12 +157,14 @@ def test_required_generation_failure_blocks_downstream_steps(
             workflow_id="workflow-1",
             plan_id="plan-failure",
             session_id="failure-session",
+            status=WorkflowStatus.CONFIRMED,
         )
         plan = ExecutionPlan(
             plan_id="plan-failure",
             session_id="failure-session",
             original_message="生成必需候选",
             summary="failure test",
+            status=PlanStatus.CONFIRMED,
             request_spec=MaterialRequestSpec(
                 required_elements=["Nd", "Fe"],
                 allowed_elements=["Nd", "Fe"],
@@ -220,7 +227,7 @@ def test_required_generation_failure_blocks_downstream_steps(
 
         async def fake_run(state, plan, workflow, step, index, total_steps):
             calls.append(step.id)
-            step.status = "failed"
+            step.transition(StepStatus.FAILED)
             step.error_message = "no candidates"
             return False, None
 
@@ -228,9 +235,9 @@ def test_required_generation_failure_blocks_downstream_steps(
         await service._execute_plan(state, plan)
 
         assert calls == ["generate-required"]
-        assert plan.status == "failed"
+        assert plan.status == PlanStatus.ABORTED
         assert state.workflow is not None
-        assert state.workflow.status == "failed"
+        assert state.workflow.status == WorkflowStatus.ABORTED
         assert plan.steps[1].status == "blocked"
         assert plan.steps[2].status == "blocked"
         assert plan.steps[3].status == "blocked"

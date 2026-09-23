@@ -30,9 +30,22 @@ const emit = defineEmits<{
 const revisionText = ref('')
 
 const statusLabel = computed(() => {
+  const capabilityStatus = props.plan?.capability_status
+  if (capabilityStatus && capabilityStatus !== 'ready') {
+    return (
+      {
+        clarification: '需要补充信息',
+        unsupported: '暂不支持',
+        unavailable: '当前不可执行',
+      }[capabilityStatus] || capabilityStatus
+    )
+  }
   const status = props.workflow?.status || props.plan?.status
   const labels: Record<string, string> = {
     awaiting_confirmation: '等待确认',
+    draft: '草稿',
+    clarification: '需要补充信息',
+    ready: '可执行',
     confirmed: '已确认',
     executing: '执行中',
     running: '执行中',
@@ -40,15 +53,26 @@ const statusLabel = computed(() => {
     partial: '部分完成',
     failed: '失败',
     cancelled: '已取消',
+    aborted: '已终止',
   }
   return status ? labels[status] || status : '尚未生成'
 })
 
 const statusType = computed(() => {
+  const capabilityStatus = props.plan?.capability_status
+  if (capabilityStatus === 'clarification') return 'warning'
+  if (capabilityStatus === 'unsupported') return 'danger'
+  if (capabilityStatus === 'unavailable') return 'warning'
   const status = props.workflow?.status || props.plan?.status
   if (status === 'completed') return 'success'
   if (status === 'failed') return 'danger'
-  if (status === 'partial' || status === 'cancelled') return 'warning'
+  if (
+    status === 'partial' ||
+    status === 'cancelled' ||
+    status === 'aborted'
+  ) {
+    return 'warning'
+  }
   if (status === 'executing' || status === 'running') return 'primary'
   return 'info'
 })
@@ -67,6 +91,16 @@ function submitRevision() {
   emit('revise', value)
   revisionText.value = ''
 }
+
+const canRevise = computed(
+  () =>
+    props.plan?.capability_status === 'ready' ||
+    props.plan?.capability_status === 'clarification'
+)
+
+const canConfirm = computed(
+  () => props.plan?.capability_status === 'ready'
+)
 </script>
 
 <template>
@@ -217,6 +251,7 @@ function submitRevision() {
       class="revision-area"
     >
       <el-input
+        v-if="canRevise"
         v-model="revisionText"
         type="textarea"
         :rows="3"
@@ -226,15 +261,16 @@ function submitRevision() {
       <div class="plan-actions">
         <el-button
           :icon="Edit"
-          :disabled="!revisionText.trim()"
+          :disabled="!canRevise || !revisionText.trim()"
           @click="submitRevision"
         >
           修改计划
         </el-button>
         <el-button
+          v-if="canConfirm"
           type="primary"
           :icon="Check"
-          :disabled="!isConnected"
+          :disabled="!isConnected || !canConfirm"
           @click="emit('confirm')"
         >
           确认执行
@@ -243,7 +279,10 @@ function submitRevision() {
     </section>
 
     <div
-      v-else-if="workflow?.status === 'running' || workflow?.status === 'queued'"
+      v-else-if="
+        workflow?.status === 'running' ||
+        workflow?.status === 'confirmed'
+      "
       class="revision-area"
     >
       <div class="plan-actions">

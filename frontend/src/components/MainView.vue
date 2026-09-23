@@ -10,6 +10,7 @@ import { useMaterialSearch } from '../composables/useMaterialSearch'
 import { useGeneration } from '../composables/useGeneration'
 import { useCampaign } from '../composables/useCampaign'
 import type { GeneratedCandidate, MaterialData } from '../types/material'
+import type { WorkflowResult } from '../types/agent'
 
 const {
   currentMaterial,
@@ -24,6 +25,7 @@ const {
   candidates: generatedCandidates,
   panelOpen: generationPanelOpen,
   openGeneration,
+  openWorkflowResult,
   restoreGeneration,
   closePanel: closeGenerationPanel,
   reopenPanel: reopenGenerationPanel,
@@ -69,6 +71,11 @@ const handleGenerationStarted = (jobId: string) => {
 const handleCampaignStarted = (nextCampaignId: string) => {
   closeGenerationPanel()
   openCampaign(nextCampaignId)
+}
+
+const handleWorkflowCompleted = (result: WorkflowResult) => {
+  closeCampaignPanel()
+  openWorkflowResult(result)
 }
 
 const handleGeneratedCandidate = (candidate: GeneratedCandidate) => {
@@ -201,6 +208,7 @@ const handleGeneratedCandidate = (candidate: GeneratedCandidate) => {
       @material-found="handleMaterialFound"
       @generation-started="handleGenerationStarted"
       @campaign-started="handleCampaignStarted"
+      @workflow-completed="handleWorkflowCompleted"
     />
   </div>
 </template>

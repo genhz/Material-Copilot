@@ -14,6 +14,7 @@ import type {
   GeneratedCandidate,
   GenerationJob,
 } from '../types/material'
+import type { WorkflowResult } from '../types/agent'
 
 const STORAGE_KEY = 'material_generation_job_id'
 
@@ -24,6 +25,7 @@ const selectedCandidateId = ref<string | null>(null)
 const panelOpen = ref(false)
 const error = ref<string | null>(null)
 const isCancelling = ref(false)
+const workflowResult = ref<WorkflowResult | null>(null)
 
 let fallbackTimer: ReturnType<typeof setTimeout> | null = null
 let requestToken = 0
@@ -42,7 +44,9 @@ const isActive = computed(
   () => job.value?.status === 'queued' || job.value?.status === 'running'
 )
 const progressPercent = computed(() =>
-  Math.round((job.value?.progress ?? 0) * 100)
+  workflowResult.value
+    ? 100
+    : Math.round((job.value?.progress ?? 0) * 100)
 )
 
 function clearFallbackTimer() {
@@ -133,6 +137,7 @@ function handleRealtimeReconnect() {
 
 function openGeneration(nextJobId: string) {
   const changed = jobId.value !== nextJobId
+  workflowResult.value = null
   jobId.value = nextJobId
   panelOpen.value = true
   localStorage.setItem(STORAGE_KEY, nextJobId)
@@ -154,6 +159,26 @@ function openGeneration(nextJobId: string) {
   }
 }
 
+function openWorkflowResult(result: WorkflowResult) {
+  if (jobId.value) {
+    unsubscribe('generation.job', jobId.value)
+  }
+  close()
+  clearFallbackTimer()
+  workflowResult.value = result
+  jobId.value = result.primary_job_id || null
+  job.value = null
+  collection.value = {
+    candidates: result.candidates,
+    invalid_count: 0,
+    total_count: result.candidate_count,
+    validation: {},
+  }
+  selectedCandidateId.value = null
+  error.value = null
+  panelOpen.value = true
+}
+
 function restoreGeneration() {
   const stored = localStorage.getItem(STORAGE_KEY)
   if (!stored) return
@@ -170,7 +195,7 @@ function closePanel() {
 }
 
 function reopenPanel() {
-  if (jobId.value) {
+  if (jobId.value || workflowResult.value) {
     panelOpen.value = true
   }
 }
@@ -206,6 +231,7 @@ function clearGeneration() {
   jobId.value = null
   job.value = null
   collection.value = null
+  workflowResult.value = null
   selectedCandidateId.value = null
   panelOpen.value = false
   error.value = null
@@ -215,6 +241,7 @@ export function useGeneration() {
   return {
     jobId,
     job,
+    workflowResult,
     candidates,
     collection,
     selectedCandidateId,
@@ -226,6 +253,7 @@ export function useGeneration() {
     isActive,
     progressPercent,
     openGeneration,
+    openWorkflowResult,
     restoreGeneration,
     closePanel,
     reopenPanel,

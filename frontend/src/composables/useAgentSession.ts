@@ -340,12 +340,18 @@ function clearSession() {
 
 const isExecuting = computed(() => {
   const status = workflow.value?.status
-  return status === 'queued' || status === 'running'
+  return status === 'confirmed' || status === 'running'
 })
 
 const primaryJobId = computed(
-  () => workflow.value?.job_ids[0] || null
+  () =>
+    workflow.value?.result?.primary_job_id ||
+    workflow.value?.result?.jobs[0]?.job_id ||
+    workflow.value?.job_ids[0] ||
+    null
 )
+
+const workflowResult = computed(() => workflow.value?.result || null)
 
 const isConnected = computed(() => socketApi?.isConnected.value || false)
 
@@ -360,6 +366,7 @@ export function useAgentSession() {
     isPlanning,
     isExecuting,
     primaryJobId,
+    workflowResult,
     lastResult,
     sessionId,
     sendMessage,
