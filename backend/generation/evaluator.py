@@ -9,6 +9,7 @@ from zipfile import BadZipFile, ZipFile
 from pymatgen.core import Structure
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 
+from agent_workflow.normalization import composition_violation
 from generation.exceptions import GenerationError
 from generation.model_registry import MatterGenModelSpec
 from generation.schemas import (
@@ -47,20 +48,12 @@ def _validate_composition(
     elements: set[str],
     request: GenerationRequest,
 ) -> str | None:
-    required = set(request.required_elements)
-    allowed = set(request.allowed_elements)
-    excluded = set(request.excluded_elements)
-
-    missing = required - elements
-    if missing:
-        return f"缺少必需元素：{sorted(missing)}"
-    forbidden = excluded & elements
-    if forbidden:
-        return f"包含禁止元素：{sorted(forbidden)}"
-    outside_allowed = elements - allowed
-    if allowed and outside_allowed:
-        return f"包含允许范围外元素：{sorted(outside_allowed)}"
-    return None
+    return composition_violation(
+        elements,
+        required_elements=request.required_elements,
+        allowed_elements=request.allowed_elements,
+        excluded_elements=request.excluded_elements,
+    )
 
 
 def _candidate_from_structure(

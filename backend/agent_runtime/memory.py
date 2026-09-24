@@ -7,6 +7,7 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
+from agent_runtime.constraints import ELEMENT_GROUPS
 from agent_runtime.tool_registry import OBJECTIVE_HINTS
 
 
@@ -16,6 +17,8 @@ class GoalMemory(BaseModel):
     message: str
     chemical_system: Optional[str] = None
     objectives: list[dict[str, Any]] = Field(default_factory=list)
+    excluded_elements: list[str] = Field(default_factory=list)
+    constraint_groups: dict[str, list[str]] = Field(default_factory=dict)
     candidate_count: Optional[int] = None
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc)
@@ -40,6 +43,8 @@ class AgentMemory(BaseModel):
     current_research_system: Optional[str] = None
     confirmed_parameters: dict[str, Any] = Field(default_factory=dict)
     proposed_parameters: dict[str, Any] = Field(default_factory=dict)
+    excluded_elements: list[str] = Field(default_factory=list)
+    constraint_groups: dict[str, list[str]] = Field(default_factory=dict)
     historical_goals: list[GoalMemory] = Field(default_factory=list)
     model_history: list[ModelSelectionMemory] = Field(default_factory=list)
     last_plan_id: Optional[str] = None
@@ -52,6 +57,12 @@ class AgentMemory(BaseModel):
         system = getattr(request.composition, "chemical_system", None)
         if system:
             self.current_research_system = system
+        self.excluded_elements = list(
+            request.composition.excluded_elements
+        )
+        self.constraint_groups = self._groups_from_elements(
+            self.excluded_elements
+        )
 
         objectives = [
             objective.model_dump(mode="json")
@@ -63,6 +74,8 @@ class AgentMemory(BaseModel):
                     message=plan.original_message,
                     chemical_system=system,
                     objectives=objectives,
+                    excluded_elements=list(self.excluded_elements),
+                    constraint_groups=dict(self.constraint_groups),
                     candidate_count=request.candidate_count,
                 )
             )
@@ -203,6 +216,8 @@ class AgentMemory(BaseModel):
             "current_research_system": self.current_research_system,
             "confirmed_parameters": self.confirmed_parameters,
             "proposed_parameters": self.proposed_parameters,
+            "excluded_elements": self.excluded_elements,
+            "constraint_groups": self.constraint_groups,
             "historical_goals": [
                 goal.model_dump(mode="json")
                 for goal in self.historical_goals[-5:]
@@ -240,6 +255,17 @@ class AgentMemory(BaseModel):
     def _suggested_value(property_name: str) -> Optional[float]:
         hint = OBJECTIVE_HINTS.get(property_name)
         return hint.suggested_value if hint else None
+
+    @staticmethod
+    def _groups_from_elements(
+        excluded_elements: list[str],
+    ) -> dict[str, list[str]]:
+        excluded = set(excluded_elements)
+        groups: dict[str, list[str]] = {}
+        for name, elements in ELEMENT_GROUPS.items():
+            if set(elements).issubset(excluded):
+                groups[name] = list(elements)
+        return groups
 
     @staticmethod
     def _increment(property_name: str, instruction: str) -> float:

@@ -34,8 +34,11 @@ OBJECTIVE_HINTS: dict[str, ObjectiveHint] = {
             "磁化强度",
             "高磁",
             "高磁性",
+            "磁体",
+            "永磁体",
             "magnetic density",
             "magnetization density",
+            "magnet",
         ),
         unit="Å^-3",
         operator=">=",
@@ -152,6 +155,7 @@ class ToolDefinition(BaseModel):
     )
     runtime_availability: Optional[bool] = None
     objective_properties: list[str] = Field(default_factory=list)
+    postprocessors: list[str] = Field(default_factory=list)
     model_id: Optional[str] = None
     kind: str = "tool"
     input_schema: dict[str, Any] = Field(default_factory=dict)
@@ -291,6 +295,7 @@ class ToolRegistry:
                 objective_properties=list(
                     capability.supported_properties
                 ),
+                postprocessors=list(capability.postprocessors),
                 model_id=capability.model_id,
                 kind="generation",
                 input_schema={

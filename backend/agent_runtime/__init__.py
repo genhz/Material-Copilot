@@ -1,5 +1,11 @@
 """Reasoning-agent runtime built on the existing workflow state machine."""
 
+from agent_runtime.constraints import (
+    ConstraintConflict,
+    NormalizedCompositionConstraints,
+    composition_violation,
+    normalize_composition_constraints,
+)
 from agent_runtime.executor import AgentToolExecutor, ToolObservation
 from agent_runtime.memory import AgentMemory, InMemoryAgentMemoryStore
 from agent_runtime.planner import AgentPlanner
@@ -21,7 +27,9 @@ __all__ = [
     "AgentPlanner",
     "AgentRunResult",
     "AgentToolExecutor",
+    "ConstraintConflict",
     "InMemoryAgentMemoryStore",
+    "NormalizedCompositionConstraints",
     "ParameterSuggestion",
     "ReActAgent",
     "ReflectionEngine",
@@ -29,4 +37,6 @@ __all__ = [
     "ToolDefinition",
     "ToolObservation",
     "ToolRegistry",
+    "composition_violation",
+    "normalize_composition_constraints",
 ]

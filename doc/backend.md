@@ -197,6 +197,31 @@ Step 2 Generate:
 
 用户确认计划即表示接受建议值。若没有可执行工具，计划会保留 Ask 步骤并标记为不可确认。
 
+## 组成硬约束
+
+`agent_runtime.constraints` 统一展开元素组并检测冲突：
+
+```text
+无稀土
+  -> rare_earth
+  -> [Sc, Y, La, Ce, Pr, Nd, Pm, Sm,
+      Eu, Gd, Tb, Dy, Ho, Er, Tm, Yb, Lu]
+```
+
+硬约束不会只保存在自然语言中。Planner 会生成独立的 `filter` 步骤，执行器在候选生成后再次验证：
+
+```text
+Generate dft_mag_density
+  ↓
+Filter: exclude rare_earth
+  ↓
+Evaluate
+  ↓
+Rank
+```
+
+存在排除约束时会进行最多 32 个候选的过采样，并按每批不超过 16 个拆分 Generation Job。若过滤后没有候选，工作流会发布 `agent.reflection`，提示扩大采样、放宽约束或更换工具。
+
 ## Agent Memory
 
 每个 session 记录：
@@ -206,6 +231,8 @@ current_research_system
 confirmed_parameters
 historical_goals
 model_history
+excluded_elements
+constraint_groups
 ```
 
 因此支持上下文化修订，例如：

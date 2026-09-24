@@ -5,6 +5,11 @@ from __future__ import annotations
 import uuid
 from typing import Any, Optional, Sequence
 
+from agent_runtime.constraints import (
+    ConstraintConflict,
+    expand_element_group,
+    normalize_composition_constraints,
+)
 from agent_runtime.memory import InMemoryAgentMemoryStore
 from agent_runtime.tool_registry import (
     OBJECTIVE_HINTS,
@@ -116,15 +121,48 @@ class AgentPlanner:
             or arguments.get("composition", {}).get("chemical_system")
             or (memory.current_research_system if memory else None)
         )
-        required_elements = list(arguments.get("required_elements") or [])
-        allowed_elements = list(arguments.get("allowed_elements") or [])
-        excluded_elements = list(arguments.get("excluded_elements") or [])
-        if chemical_system and not allowed_elements:
-            allowed_elements = [
-                element
-                for element in str(chemical_system).split("-")
-                if element
-            ]
+        constraint_errors = list(arguments.get("constraint_errors") or [])
+        try:
+            normalized_constraints = normalize_composition_constraints(
+                required_elements=arguments.get("required_elements") or [],
+                allowed_elements=arguments.get("allowed_elements") or [],
+                excluded_elements=arguments.get("excluded_elements") or [],
+                chemical_system=chemical_system,
+            )
+        except ConstraintConflict as exc:
+            constraint_errors.append(
+                {"code": exc.code, "message": exc.message}
+            )
+            normalized_constraints = None
+
+        if normalized_constraints is not None:
+            required_elements = list(
+                normalized_constraints.required_elements
+            )
+            allowed_elements = list(
+                normalized_constraints.allowed_elements
+            )
+            excluded_elements = list(
+                normalized_constraints.excluded_elements
+            )
+            constraint_groups = (
+                arguments.get("constraint_groups")
+                or normalized_constraints.groups
+            )
+        else:
+            required_elements = list(
+                arguments.get("required_elements") or []
+            )
+            allowed_elements = list(
+                arguments.get("allowed_elements") or []
+            )
+            excluded_elements = []
+            for value in arguments.get("excluded_elements") or []:
+                expanded = expand_element_group(value)
+                for element in expanded or [value]:
+                    if element not in excluded_elements:
+                        excluded_elements.append(element)
+            constraint_groups = arguments.get("constraint_groups") or {}
 
         objectives = self._normalize_objectives(
             arguments.get("objectives") or []
@@ -164,10 +202,12 @@ class AgentPlanner:
         assumptions: list[str] = []
         ask_steps: list[PlanStep] = []
         generation_steps: list[PlanStep] = []
+        filter_steps: list[PlanStep] = []
         evaluation_steps: list[PlanStep] = []
         effective_values: dict[str, float] = {}
         parameter_sources: dict[str, str] = {}
         missing_required: list[str] = []
+        planned_candidate_count: Optional[int] = None
 
         preferred_tool = selected_tools[0] if selected_tools else None
         for objective in objectives:
@@ -213,18 +253,31 @@ class AgentPlanner:
                 request,
                 effective_values,
             )
-            candidate_decision = self._candidate_decision(request)
-            planning_decisions.append(candidate_decision)
-            generation_step = self._generate_step(
-                tool=primary,
-                conditions=primary_conditions,
-                candidate_count=int(candidate_decision["value"]),
-                parameter_sources={
-                    **condition_sources,
-                    "candidate_count": str(candidate_decision["source"]),
-                },
+            candidate_decision = self._candidate_decision(
+                request,
+                oversample=bool(excluded_elements),
             )
-            generation_steps.append(generation_step)
+            planned_candidate_count = int(candidate_decision["value"])
+            planning_decisions.append(candidate_decision)
+            generation_steps.extend(
+                self._generate_step(
+                    tool=primary,
+                    conditions=primary_conditions,
+                    candidate_count=count,
+                    parameter_sources={
+                        **condition_sources,
+                        "candidate_count": str(
+                            candidate_decision["source"]
+                        ),
+                    },
+                )
+                for count in self._split_candidate_count(
+                    int(candidate_decision["value"])
+                )
+            )
+            generation_step_ids = [
+                step.id for step in generation_steps
+            ]
             planning_decisions.append(
                 self._tool_decision(
                     primary,
@@ -232,6 +285,39 @@ class AgentPlanner:
                     memory=memory,
                 )
             )
+            if (
+                required_elements
+                or allowed_elements
+                or excluded_elements
+            ):
+                filter_step = self._constraint_filter_step(
+                    required_elements=required_elements,
+                    allowed_elements=allowed_elements,
+                    excluded_elements=excluded_elements,
+                    groups=(
+                        constraint_groups
+                    ),
+                    depends_on=generation_step_ids,
+                )
+                filter_steps.append(filter_step)
+                planning_decisions.append(
+                    {
+                        "parameter": "composition_constraints",
+                        "value": {
+                            "required_elements": required_elements,
+                            "allowed_elements": allowed_elements,
+                            "excluded_elements": excluded_elements,
+                            "groups": (
+                                constraint_groups
+                            ),
+                        },
+                        "source": "user",
+                        "rationale": (
+                            "组成硬约束通过候选后处理过滤执行，"
+                            "不会静默丢弃。"
+                        ),
+                    }
+                )
 
             for extra_tool in selected_tools[1:]:
                 covered = set(
@@ -244,11 +330,16 @@ class AgentPlanner:
                     and objective.property not in covered
                 ]
                 for objective in uncovered:
+                    evaluation_dependencies = (
+                        [filter_steps[-1].id]
+                        if filter_steps
+                        else generation_step_ids
+                    )
                     evaluation_steps.append(
                         self._evaluate_step(
                             objective=objective,
                             tool=extra_tool,
-                            depends_on=[generation_step.id],
+                            depends_on=evaluation_dependencies,
                         )
                     )
                     planning_decisions.append(
@@ -276,15 +367,24 @@ class AgentPlanner:
         rank_steps: list[PlanStep] = []
         if (
             generation_steps
-            and (evaluation_steps or len(objectives) > 1)
+            and (
+                evaluation_steps
+                or filter_steps
+                or len(objectives) > 1
+            )
         ):
             rank_dependencies = [
                 step.id
-                for step in [*generation_steps, *evaluation_steps]
+                for step in [
+                    *generation_steps,
+                    *filter_steps,
+                    *evaluation_steps,
+                ]
             ]
             rank_steps.append(
                 self._rank_step(
                     objectives=objectives,
+                    effective_values=effective_values,
                     depends_on=rank_dependencies,
                 )
             )
@@ -294,7 +394,23 @@ class AgentPlanner:
             for tool in selected_tools
             if tool.runtime_availability is not True
         ]
-        if runtime_unavailable and generation_steps:
+        if constraint_errors:
+            capability_status = "clarification"
+            selection_reasons.extend(
+                str(error.get("message") or error.get("code"))
+                for error in constraint_errors
+            )
+            generation_steps = []
+            filter_steps = []
+            evaluation_steps = []
+            rank_steps = []
+            ask_steps.append(
+                self._ask_step(
+                    objective=None,
+                    suggestion=None,
+                )
+            )
+        elif runtime_unavailable and generation_steps:
             capability_status = "unavailable"
             selection_reasons.extend(
                 f"{name}_runtime_unavailable"
@@ -311,6 +427,7 @@ class AgentPlanner:
         steps = [
             *ask_steps,
             *generation_steps,
+            *filter_steps,
             *evaluation_steps,
             *rank_steps,
         ]
@@ -320,8 +437,9 @@ class AgentPlanner:
             ),
             evaluation_tools=selected_tools[1:],
             objectives=objectives,
-            candidate_count=request.candidate_count,
+            candidate_count=planned_candidate_count,
             has_evaluation=bool(evaluation_steps),
+            has_filter=bool(filter_steps),
             has_rank=bool(rank_steps),
         )
         assumptions.extend(
@@ -333,6 +451,10 @@ class AgentPlanner:
         if evaluation_steps:
             assumptions.append(
                 "若候选缺少目标性质字段，评估步骤应返回未评估观察，不得伪造数值。"
+            )
+        if filter_steps:
+            assumptions.append(
+                "元素组约束已展开为具体元素，并在候选生成后执行硬过滤。"
             )
 
         return self._new_plan(
@@ -670,8 +792,16 @@ class AgentPlanner:
     @staticmethod
     def _candidate_decision(
         request: MaterialRequirementSpec,
+        *,
+        oversample: bool = False,
     ) -> dict[str, Any]:
-        if request.candidate_count is not None:
+        requested_count = request.candidate_count or 8
+        effective_count = (
+            min(32, max(requested_count, requested_count * 2))
+            if oversample
+            else requested_count
+        )
+        if request.candidate_count is not None and not oversample:
             return {
                 "parameter": "candidate_count",
                 "value": request.candidate_count,
@@ -680,10 +810,31 @@ class AgentPlanner:
             }
         return {
             "parameter": "candidate_count",
-            "value": 8,
-            "source": "planning_policy",
-            "rationale": "未指定候选数量，使用 Agent 默认值 8。",
+            "value": effective_count,
+            "source": (
+                "planning_policy"
+                if request.candidate_count is None
+                else "user"
+            ),
+            "rationale": (
+                "存在硬组成约束，按每批最多 16 个候选进行过采样，"
+                "补偿后处理过滤损耗。"
+                if oversample
+                else "未指定候选数量，使用 Agent 默认值 8。"
+            ),
         }
+
+    @staticmethod
+    def _split_candidate_count(total: int) -> list[int]:
+        total = max(1, total)
+        if total <= 16:
+            return [total]
+        step_count = (total + 15) // 16
+        base, remainder = divmod(total, step_count)
+        return [
+            base + (1 if index < remainder else 0)
+            for index in range(step_count)
+        ]
 
     @staticmethod
     def _tool_decision(
@@ -852,21 +1003,56 @@ class AgentPlanner:
         )
 
     @staticmethod
+    def _constraint_filter_step(
+        *,
+        required_elements: Sequence[str],
+        allowed_elements: Sequence[str],
+        excluded_elements: Sequence[str],
+        groups: dict[str, tuple[str, ...]],
+        depends_on: list[str],
+    ) -> PlanStep:
+        return PlanStep(
+            id=f"filter-{uuid.uuid4().hex[:8]}",
+            kind="filter",
+            title="过滤组成硬约束",
+            description=(
+                "按必需、允许和排除元素过滤候选；元素组已经展开。"
+            ),
+            inputs={
+                "required_elements": list(required_elements),
+                "allowed_elements": list(allowed_elements),
+                "excluded_elements": list(excluded_elements),
+                "groups": {
+                    name: list(elements)
+                    for name, elements in groups.items()
+                },
+            },
+            depends_on=depends_on,
+            requires_candidates=True,
+            required=True,
+            on_failure="abort",
+        )
+
+    @staticmethod
     def _rank_step(
         *,
         objectives: Sequence[ObjectiveSpec],
+        effective_values: dict[str, float],
         depends_on: list[str],
     ) -> PlanStep:
+        ranking_objectives = []
+        for objective in objectives:
+            data = objective.model_dump(mode="json")
+            if data.get("target") is None:
+                data["target"] = effective_values.get(objective.property)
+            ranking_objectives.append(data)
         return PlanStep(
             id=f"rank-{uuid.uuid4().hex[:8]}",
             kind="rank",
             title="排序候选",
             description="按已确认目标汇总并排序候选。",
             inputs={
-                "objectives": [
-                    objective.model_dump(mode="json")
-                    for objective in objectives
-                ]
+                "objectives": ranking_objectives
             },
             depends_on=depends_on,
             requires_candidates=True,
@@ -901,6 +1087,7 @@ class AgentPlanner:
         objectives: Sequence[ObjectiveSpec],
         candidate_count: Optional[int],
         has_evaluation: bool,
+        has_filter: bool,
         has_rank: bool,
     ) -> str:
         def labels_for(tool: Optional[ToolDefinition]) -> list[str]:
@@ -926,6 +1113,8 @@ class AgentPlanner:
         if not primary_labels:
             primary_labels = [primary_tool.name if primary_tool else "candidate"]
         parts = [f"Generate {primary_labels[0]}"]
+        if has_filter:
+            parts.append("Filter constraints")
         for tool in evaluation_tools:
             labels = labels_for(tool)
             if labels:

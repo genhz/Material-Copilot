@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from agent_runtime.react_agent import ReActAgent
+from agent_workflow.normalization import composition_violation
 from agent_workflow.planner import WorkflowPlanner
 from agent_workflow.requirement_parser import RequirementParser
 from agent_workflow.schemas import (
@@ -409,6 +410,7 @@ class AgentWorkflowService:
         job_ids: list[str] = []
         candidate_jobs: list[tuple[PlanStep, str]] = []
         generation_jobs: list[tuple[PlanStep, str]] = []
+        postprocess_steps: list[PlanStep] = []
         failures: list[dict[str, Any]] = []
         had_optional_failure = False
         total_steps = max(1, len(plan.steps))
@@ -452,6 +454,13 @@ class AgentWorkflowService:
 
             for index, step in enumerate(plan.steps):
                 workflow.current_step_id = step.id
+
+                if (
+                    step.kind in {"filter", "evaluate", "rank"}
+                    and step.requires_candidates
+                ):
+                    postprocess_steps.append(step)
+                    continue
 
                 if step.status in {
                     StepStatus.FAILED,
@@ -630,9 +639,33 @@ class AgentWorkflowService:
                 candidates.extend(job_candidates)
 
             candidate_count = len(candidates)
+            if postprocess_steps:
+                candidates = await self._run_postprocess_steps(
+                    state,
+                    workflow,
+                    postprocess_steps,
+                    candidates,
+                )
+                candidate_count = len(candidates)
+            verification_incomplete = any(
+                step.output.get("status") in {"unverified", "observation_pending"}
+                for step in postprocess_steps
+            )
 
             workflow.candidate_count = candidate_count
             if candidate_count == 0:
+                await self.publish(
+                    state.session_id,
+                    "agent.reflection",
+                    {
+                        "status": "replan_required",
+                        "reason": "zero_candidates_after_constraints",
+                        "message": (
+                            "硬约束过滤后没有候选，建议扩大采样、"
+                            "放宽约束或调整生成模型。"
+                        ),
+                    },
+                )
                 if generation_jobs:
                     failed_status = aggregate_workflow_status(
                         [step.status for step, _ in generation_jobs],
@@ -667,7 +700,11 @@ class AgentWorkflowService:
 
             aggregated_status = aggregate_workflow_status(
                 [job.status for job in result_jobs],
-                has_failures=bool(failures) or had_optional_failure,
+                has_failures=(
+                    bool(failures)
+                    or had_optional_failure
+                    or verification_incomplete
+                ),
             )
             workflow.transition(aggregated_status)
             if aggregated_status == WorkflowStatus.COMPLETED:
@@ -701,6 +738,16 @@ class AgentWorkflowService:
                 ),
                 candidates=candidates,
                 failures=failures,
+                steps=[
+                    {
+                        "step_id": step.id,
+                        "kind": step.kind,
+                        "status": step.status.value,
+                        "output": step.output,
+                        "error_message": step.error_message,
+                    }
+                    for step in plan.steps
+                ],
             )
             await self.publish(
                 state.session_id,
@@ -728,6 +775,227 @@ class AgentWorkflowService:
                     "error": str(exc),
                 },
             )
+
+    async def _run_postprocess_steps(
+        self,
+        state: AgentSessionState,
+        workflow: WorkflowRunState,
+        steps: list[PlanStep],
+        candidates: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        for step in steps:
+            if step.status in {
+                StepStatus.COMPLETED,
+                StepStatus.FAILED,
+                StepStatus.BLOCKED,
+                StepStatus.SKIPPED,
+                StepStatus.CANCELLED,
+            }:
+                continue
+            step.transition(StepStatus.RUNNING)
+            await self.publish(
+                state.session_id,
+                "step.started",
+                {
+                    "workflow_id": workflow.workflow_id,
+                    "step": step.model_dump(mode="json"),
+                },
+            )
+            try:
+                if step.kind == "filter":
+                    candidates, step.output = self._filter_candidates(
+                        step,
+                        candidates,
+                    )
+                elif step.kind == "evaluate":
+                    step.output = self._evaluate_candidates(
+                        step,
+                        candidates,
+                    )
+                elif step.kind == "rank":
+                    candidates, step.output = self._rank_candidates(
+                        step,
+                        candidates,
+                    )
+                else:
+                    step.output = {
+                        "status": "skipped",
+                        "reason": "unknown_postprocess_step",
+                    }
+            except Exception as exc:
+                step.transition(StepStatus.FAILED)
+                step.error_message = str(exc)
+                await self.publish(
+                    state.session_id,
+                    "step.failed",
+                    {
+                        "workflow_id": workflow.workflow_id,
+                        "step": step.model_dump(mode="json"),
+                    },
+                )
+                if step.required:
+                    raise
+                continue
+
+            step.transition(StepStatus.COMPLETED)
+            step.progress = 1.0
+            await self.publish(
+                state.session_id,
+                "step.completed",
+                {
+                    "workflow_id": workflow.workflow_id,
+                    "step": step.model_dump(mode="json"),
+                },
+            )
+            await self.publish(
+                state.session_id,
+                "agent.observation",
+                {
+                    "workflow_id": workflow.workflow_id,
+                    "step_id": step.id,
+                    "kind": step.kind,
+                    "observation": step.output,
+                },
+            )
+        return candidates
+
+    @staticmethod
+    def _filter_candidates(
+        step: PlanStep,
+        candidates: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        required = list(step.inputs.get("required_elements") or [])
+        allowed = list(step.inputs.get("allowed_elements") or [])
+        excluded = list(step.inputs.get("excluded_elements") or [])
+        passed: list[dict[str, Any]] = []
+        rejected: list[dict[str, Any]] = []
+
+        for candidate in candidates:
+            elements = set(candidate.get("elements") or [])
+            violation = composition_violation(
+                elements,
+                required_elements=required,
+                allowed_elements=allowed,
+                excluded_elements=excluded,
+            )
+            if violation is None:
+                passed.append(candidate)
+                continue
+            rejected.append(
+                {
+                    "candidate_id": candidate.get("candidate_id"),
+                    "reason": violation,
+                }
+            )
+
+        return passed, {
+            "status": "completed",
+            "input_count": len(candidates),
+            "output_count": len(passed),
+            "rejected_count": len(rejected),
+            "rejected": rejected,
+            "constraints": {
+                "required_elements": required,
+                "allowed_elements": allowed,
+                "excluded_elements": excluded,
+            },
+        }
+
+    @staticmethod
+    def _evaluate_candidates(
+        step: PlanStep,
+        candidates: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        property_name = str(step.inputs.get("property") or "")
+        values = [
+            (
+                candidate.get("candidate_id"),
+                candidate.get("predicted_properties", {}).get(
+                    property_name
+                ),
+                candidate.get("property_sources", {}).get(property_name),
+            )
+            for candidate in candidates
+        ]
+        evaluated = [
+            {
+                "candidate_id": candidate_id,
+                "value": value,
+                "source": source,
+            }
+            for candidate_id, value, source in values
+            if value is not None
+        ]
+        return {
+            "status": "evaluated" if evaluated else "unverified",
+            "property": property_name,
+            "evaluated_count": len(evaluated),
+            "missing_count": len(candidates) - len(evaluated),
+            "values": evaluated,
+            "message": (
+                None
+                if evaluated
+                else (
+                    f"候选缺少 {property_name} 的真实预测值；"
+                    "当前只能保留生成条件，不能声称已经验证。"
+                )
+            ),
+        }
+
+    @staticmethod
+    def _rank_candidates(
+        step: PlanStep,
+        candidates: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        objectives = list(step.inputs.get("objectives") or [])
+        scored: list[tuple[float, dict[str, Any]]] = []
+        unscored: list[dict[str, Any]] = []
+
+        for candidate in candidates:
+            properties = candidate.get("predicted_properties") or {}
+            score = 0.0
+            score_count = 0
+            for objective in objectives:
+                property_name = str(objective.get("property") or "")
+                target = objective.get("target")
+                value = properties.get(property_name)
+                if target is None or value is None:
+                    continue
+                target_value = float(target)
+                numeric_value = float(value)
+                operator = objective.get("operator", ">=")
+                if operator == ">=":
+                    component = numeric_value - target_value
+                elif operator == "<=":
+                    component = target_value - numeric_value
+                else:
+                    component = -abs(numeric_value - target_value)
+                score += component
+                score_count += 1
+            if score_count:
+                scored.append((score, candidate))
+            else:
+                unscored.append(candidate)
+
+        scored.sort(
+            key=lambda item: (
+                item[0],
+                str(item[1].get("candidate_id") or ""),
+            ),
+            reverse=True,
+        )
+        ranked = [candidate for _, candidate in scored] + unscored
+        return ranked, {
+            "status": "ranked" if scored else "unverified",
+            "ranked_count": len(scored),
+            "unranked_count": len(unscored),
+            "objectives": objectives,
+            "message": (
+                None
+                if scored
+                else "没有可用于排序的真实性质预测值，候选顺序保持不变。"
+            ),
+        }
 
     def _preflight_step(
         self,

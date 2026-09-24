@@ -17,6 +17,10 @@ from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 
 from agent_runtime.executor import AgentToolExecutor, ToolObservation
+from agent_runtime.constraints import (
+    ConstraintConflict,
+    normalize_composition_constraints,
+)
 from agent_runtime.memory import AgentMemory, InMemoryAgentMemoryStore
 from agent_runtime.planner import AgentPlanner
 from agent_runtime.reflection import ReflectionEngine, ReflectionResult
@@ -76,6 +80,9 @@ GENERATION_TERMS = (
     "discover",
     "find",
 )
+MATERIAL_CLASS_TERMS = {
+    "magnet": ("磁体", "磁铁", "永磁", "magnet"),
+}
 LOOKUP_TERMS = (
     "查看",
     "查询",
@@ -352,7 +359,7 @@ class ReActAgent:
     ) -> AgentDecision:
         if self.use_llm:
             try:
-                return await asyncio.wait_for(
+                decision = await asyncio.wait_for(
                     self._llm_decision(
                         message=message,
                         history=history,
@@ -362,6 +369,13 @@ class ReActAgent:
                         observations=observations,
                     ),
                     timeout=25,
+                )
+                return self._validate_and_merge_decision(
+                    decision=decision,
+                    message=message,
+                    memory=memory,
+                    previous_plan=previous_plan,
+                    mode=mode,
                 )
             except Exception as exc:
                 logger.warning(
@@ -375,6 +389,74 @@ class ReActAgent:
             mode=mode,
             observations=observations,
         )
+
+    def _validate_and_merge_decision(
+        self,
+        *,
+        decision: AgentDecision,
+        message: str,
+        memory: AgentMemory,
+        previous_plan: Optional[ExecutionPlan],
+        mode: str,
+    ) -> AgentDecision:
+        """Apply deterministic hard constraints on top of LLM output."""
+
+        if mode == "revise" and previous_plan is not None:
+            deterministic = self._apply_revision(
+                self.planner.arguments_from_plan(previous_plan),
+                message,
+                memory,
+            )
+        else:
+            deterministic = self._infer_arguments(message, memory)
+
+        arguments = dict(decision.arguments)
+        for key in (
+            "task_type",
+            "material_class",
+            "output_requirements",
+            "chemical_system",
+            "required_elements",
+            "allowed_elements",
+            "excluded_elements",
+            "constraint_groups",
+            "constraint_errors",
+            "candidate_count",
+            "model_preferences",
+        ):
+            value = deterministic.get(key)
+            if value not in (None, [], {}):
+                arguments[key] = value
+
+        arguments["objectives"] = self._merge_objectives(
+            list(arguments.get("objectives") or []),
+            list(deterministic.get("objectives") or []),
+        )
+        deterministic_objectives = {
+            str(objective.get("property")): objective
+            for objective in deterministic.get("objectives") or []
+            if objective.get("property")
+        }
+        for objective in arguments["objectives"]:
+            canonical = deterministic_objectives.get(
+                str(objective.get("property") or "")
+            )
+            if canonical is None:
+                continue
+            objective["target"] = canonical.get("target")
+            objective["operator"] = canonical.get("operator")
+            objective["unit"] = canonical.get("unit")
+            objective["semantic_goal"] = canonical.get("semantic_goal")
+
+        if (
+            deterministic.get("task_type") == "material_generation"
+            and decision.action in {"material_search", "science_chat"}
+            and not deterministic.get("formula")
+        ):
+            decision.action = "plan_generation"
+
+        decision.arguments = arguments
+        return decision
 
     async def _llm_decision(
         self,
@@ -518,14 +600,45 @@ Agent Memory：
         ]
         arguments: dict[str, Any] = {
             "task_type": task_type,
+            "material_class": self._infer_material_class(message),
+            "output_requirements": self._infer_output_requirements(message),
             "chemical_system": composition.get("chemical_system"),
             "required_elements": composition.get("required_elements", []),
             "allowed_elements": composition.get("allowed_elements", []),
-            "excluded_elements": composition.get("excluded_elements", []),
+            "excluded_elements": (
+                composition.get("excluded_elements")
+                or list(memory.excluded_elements)
+            ),
+            "constraint_groups": (
+                composition.get("constraint_groups")
+                or dict(memory.constraint_groups)
+            ),
             "objectives": objectives,
             "candidate_count": self._extract_candidate_count(message),
             "model_preferences": model_preferences,
         }
+        try:
+            normalized = normalize_composition_constraints(
+                required_elements=arguments["required_elements"],
+                allowed_elements=arguments["allowed_elements"],
+                excluded_elements=arguments["excluded_elements"],
+                chemical_system=arguments["chemical_system"],
+            )
+        except ConstraintConflict as exc:
+            arguments["constraint_errors"] = [
+                {"code": exc.code, "message": exc.message}
+            ]
+        else:
+            arguments["required_elements"] = list(
+                normalized.required_elements
+            )
+            arguments["allowed_elements"] = list(
+                normalized.allowed_elements
+            )
+            arguments["excluded_elements"] = list(
+                normalized.excluded_elements
+            )
+            arguments["constraint_groups"] = normalized.groups
 
         formula = self._extract_formula(message)
         if task_type == "material_lookup":
@@ -626,6 +739,32 @@ Agent Memory：
                     ]
                 )
             )
+
+        excluded_update = composition_update.get("excluded_elements") or []
+        allow_rare_earth = any(
+            phrase in instruction
+            for phrase in (
+                "允许稀土",
+                "不要排除稀土",
+                "取消无稀土",
+                "移除无稀土约束",
+            )
+        )
+        if allow_rare_earth:
+            result["excluded_elements"] = []
+            result.pop("constraint_groups", None)
+        elif excluded_update:
+            result["excluded_elements"] = list(
+                dict.fromkeys(
+                    [
+                        *list(result.get("excluded_elements") or []),
+                        *excluded_update,
+                    ]
+                )
+            )
+            groups = dict(result.get("constraint_groups") or {})
+            groups.update(composition_update.get("constraint_groups") or {})
+            result["constraint_groups"] = groups
         return result
 
     def _infer_task_type(self, message: str) -> str:
@@ -633,14 +772,14 @@ Agent Memory：
         formula = self._extract_formula(message)
         if any(term in lowered for term in SUBSTITUTION_TERMS):
             return "element_substitution"
-        if formula and any(term in lowered for term in LOOKUP_TERMS):
-            return "material_lookup"
         if any(term in lowered for term in GENERATION_TERMS):
             return "material_generation"
-        if self.tool_registry.property_mentioned(message):
-            return "material_generation"
+        if formula and any(term in lowered for term in LOOKUP_TERMS):
+            return "material_lookup"
         if any(term in lowered for term in CHAT_TERMS):
             return "science_chat"
+        if self.tool_registry.property_mentioned(message):
+            return "material_generation"
         return "science_chat"
 
     @staticmethod
@@ -669,8 +808,11 @@ Agent Memory：
         return "这是材料知识问题，应选择科学对话工具。"
 
     def _extract_composition(self, message: str) -> dict[str, Any]:
+        lowered = message.lower()
         required_elements: list[str] = []
         allowed_elements: list[str] = []
+        excluded_elements: list[str] = []
+        constraint_groups: dict[str, list[str]] = {}
         exact_formula = self._extract_formula(message)
         chemical_system_match = CHEMICAL_SYSTEM_PATTERN.search(message)
         chemical_system = (
@@ -693,6 +835,42 @@ Agent Memory：
             ):
                 required_elements.append(symbol)
 
+        negative_group_patterns = {
+            "heavy_rare_earth": (
+                "无重稀土",
+                "不含重稀土",
+                "排除重稀土",
+                "禁止重稀土",
+                "heavy rare earth free",
+            ),
+            "rare_earth": (
+                "无稀土",
+                "不含稀土",
+                "排除稀土",
+                "禁止稀土",
+                "不含镧系",
+                "无镧系",
+                "rare earth free",
+                "rare-earth-free",
+            ),
+        }
+        for group, phrases in negative_group_patterns.items():
+            if any(phrase in lowered for phrase in phrases):
+                if group == "heavy_rare_earth":
+                    excluded_elements.append(group)
+                else:
+                    excluded_elements.append(group)
+                constraint_groups.setdefault(group, [])
+
+        for match in re.finditer(
+            r"(?:不含|排除|禁止|去掉|移除)\s*"
+            r"([A-Z][a-z]?(?:\s*[,，、和]\s*[A-Z][a-z]?)*)",
+            message,
+        ):
+            excluded_elements.extend(
+                re.findall(r"[A-Z][a-z]?", match.group(1))
+            )
+
         if chemical_system:
             allowed_elements = [
                 element
@@ -703,8 +881,30 @@ Agent Memory：
             "chemical_system": chemical_system,
             "required_elements": list(dict.fromkeys(required_elements)),
             "allowed_elements": list(dict.fromkeys(allowed_elements)),
+            "excluded_elements": list(
+                dict.fromkeys(excluded_elements)
+            ),
+            "constraint_groups": constraint_groups,
             "exact_formula": exact_formula,
         }
+
+    @staticmethod
+    def _infer_material_class(message: str) -> Optional[str]:
+        lowered = message.lower()
+        for material_class, terms in MATERIAL_CLASS_TERMS.items():
+            if any(term in lowered for term in terms):
+                return material_class
+        return None
+
+    @staticmethod
+    def _infer_output_requirements(message: str) -> list[str]:
+        outputs: list[str] = []
+        if any(
+            term in message
+            for term in ("晶体结构", "结构", "cif", "CIF")
+        ):
+            outputs.append("crystal_structure")
+        return outputs
 
     def _extract_allowed_elements(self, message: str) -> list[str]:
         elements: list[str] = []
@@ -822,7 +1022,11 @@ Agent Memory：
             if "较稳定" in message or "稳定" in message or "stable" in lowered:
                 return "stable"
         if property_name == "dft_mag_density" and (
-            "高磁" in message or "high magnetic" in lowered
+            "高磁" in message
+            or "磁体" in message
+            or "永磁" in message
+            or "magnet" in lowered
+            or "high magnetic" in lowered
         ):
             return "high_magnetic_density"
         if property_name == "hhi_score" and (

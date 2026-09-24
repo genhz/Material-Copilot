@@ -212,6 +212,8 @@ class GeneratedCandidate(BaseModel):
     elements: list[str] = Field(default_factory=list)
     source: Literal["mattergen"] = "mattergen"
     generation_conditions: dict[str, Any] = Field(default_factory=dict)
+    predicted_properties: dict[str, float] = Field(default_factory=dict)
+    property_sources: dict[str, str] = Field(default_factory=dict)
     validation: dict[str, Any] = Field(default_factory=dict)
     spacegroup_symbol: Optional[str] = None
     spacegroup_number: Optional[int] = None
